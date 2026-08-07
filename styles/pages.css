@@ -44,6 +44,22 @@
   padding-bottom: 6px;
 }
 
+.admin-table {
+  margin-top: 10px;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  border: 1px solid grey;
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.admin-table th {
+  background-color: rgb(230, 230, 230);
+}
+
 .flex-dificulty .home-secondary {
   font-size: medium;
   width: 80%;
