@@ -1,0 +1,13 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="shieldGrad" cx="35%" cy="25%" r="80%">
+      <stop offset="0%" stop-color="#eafaf0"/>
+      <stop offset="55%" stop-color="#4ab87a"/>
+      <stop offset="100%" stop-color="#1f6b45"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#eafaf0"/>
+  <path d="M100 26 L156 46 V96 C156 132 132 156 100 172 C68 156 44 132 44 96 V46 Z" fill="url(#shieldGrad)" stroke="#134a2e" stroke-width="6"/>
+  <path d="M78 96 a22 22 0 1 1 6 15" fill="none" stroke="#0d3320" stroke-width="8" stroke-linecap="round"/>
+  <path d="M78 82 L78 100 L96 100" fill="none" stroke="#0d3320" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

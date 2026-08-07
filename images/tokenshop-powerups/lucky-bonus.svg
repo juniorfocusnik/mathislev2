@@ -1,0 +1,15 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="luckyGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#f3ffe9"/>
+      <stop offset="55%" stop-color="#6ec93a"/>
+      <stop offset="100%" stop-color="#2f7a0a"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#f3ffe9"/>
+  <path d="M100 40 C90 40 84 50 84 62 C84 50 74 46 66 52 C58 58 58 70 66 78 C58 70 46 70 40 78 C34 86 38 98 48 102 C38 98 28 104 26 114 C24 124 32 134 42 134 C50 148 66 158 82 158 L100 158 L118 158 C134 158 150 148 158 134 C168 134 176 124 174 114 C172 104 162 98 152 102 C162 98 166 86 160 78 C154 70 142 70 134 78 C142 70 142 58 134 52 C126 46 116 50 116 62 C116 50 110 40 100 40 Z" fill="url(#luckyGrad)" stroke="#1f5c07" stroke-width="5"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="900" text-anchor="middle">
+    <rect x="118" y="140" width="66" height="36" rx="12" fill="#1f5c07"/>
+    <text x="151" y="164" font-size="18" fill="#f3ffe9">x2!</text>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="coinGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#fff6c9"/>
+      <stop offset="55%" stop-color="#f6c94a"/>
+      <stop offset="100%" stop-color="#c9930f"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#fff8e0"/>
+  <circle cx="100" cy="100" r="78" fill="url(#coinGrad)" stroke="#a3720a" stroke-width="6"/>
+  <circle cx="100" cy="100" r="60" fill="none" stroke="#a3720a" stroke-width="4" stroke-dasharray="6 8"/>
+  <text x="100" y="122" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="900" text-anchor="middle" fill="#7a4e00">x2</text>
+  <path d="M50 40 L56 54 L70 56 L59 66 L62 80 L50 72 L38 80 L41 66 L30 56 L44 54 Z" fill="#ffe98a"/>
+  <path d="M158 130 L162 140 L172 142 L164 149 L166 159 L158 153 L150 159 L152 149 L144 142 L154 140 Z" fill="#ffe98a"/>
+</svg>

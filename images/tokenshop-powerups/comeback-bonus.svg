@@ -1,0 +1,17 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="comebackGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#fdf0e6"/>
+      <stop offset="55%" stop-color="#e8823a"/>
+      <stop offset="100%" stop-color="#a04e0a"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#fdf0e6"/>
+  <circle cx="100" cy="100" r="78" fill="url(#comebackGrad)" stroke="#6e3608" stroke-width="6"/>
+  <path d="M70 70 a42 42 0 1 1 -12 30" fill="none" stroke="#fff3e8" stroke-width="10" stroke-linecap="round"/>
+  <path d="M52 78 L58 100 L80 94 Z" fill="#fff3e8"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="900" text-anchor="middle">
+    <rect x="118" y="140" width="66" height="36" rx="12" fill="#6e3608"/>
+    <text x="151" y="165" font-size="20" fill="#fff3e8">+25</text>
+  </g>
+</svg>

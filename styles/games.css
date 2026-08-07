@@ -1,0 +1,112 @@
+.game-shell {
+  align-items: center;
+}
+
+.game-timer {
+  font-size: 22px;
+  font-weight: bold;
+}
+
+.game-progress {
+  font-size: 18px;
+}
+
+.game-question-card {
+  align-items: center;
+  border: 3px solid rgb(180, 180, 180);
+}
+
+.game-difficulty-normal {
+  border-color: #04a40e;
+}
+
+.game-difficulty-hard {
+  border-color: #e39400;
+}
+
+.game-difficulty-master {
+  border-color: #0047ab;
+}
+
+.game-difficulty-easyDenys {
+  border-color: #e30000;
+}
+
+.game-difficulty-ultimateDenys {
+  border-color: #9000d2;
+}
+
+.game-question-text {
+  font-size: 26px;
+  text-align: center;
+  max-width: 600px;
+}
+
+.game-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.game-answer-input {
+  font-size: 18px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 2px solid rgb(180, 180, 180);
+  width: 220px;
+}
+
+.game-answer-input:focus {
+  outline: none;
+  border-color: rgb(0, 60, 255);
+}
+
+.game-answer-input:disabled {
+  background-color: rgb(235, 235, 235);
+}
+
+.game-submit-btn {
+  cursor: pointer;
+  background-color: green;
+  border: 1px white solid;
+  border-radius: 8px;
+  color: white;
+  padding: 9px 18px;
+  font-size: 16px;
+  box-shadow: 0 0 5px gray;
+  transition: background-color 0.1s;
+}
+
+.game-submit-btn:hover:not(:disabled) {
+  background-color: rgb(41, 177, 41);
+}
+
+.game-submit-btn:active:not(:disabled) {
+  background-color: rgb(85, 209, 85);
+}
+
+.game-submit-btn:disabled {
+  cursor: default;
+  background-color: rgb(150, 150, 150);
+}
+
+.game-feedback {
+  min-height: 1.4em;
+  margin-top: 12px;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.game-feedback-correct {
+  color: #04a40e;
+}
+
+.game-feedback-incorrect {
+  color: #e30000;
+}
+
+.game-feedback-neutral {
+  color: rgb(120, 120, 120);
+}

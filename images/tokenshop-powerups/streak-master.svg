@@ -1,0 +1,15 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="flameGradBlue" cx="45%" cy="25%" r="80%">
+      <stop offset="0%" stop-color="#eaf6ff"/>
+      <stop offset="50%" stop-color="#4ab0ff"/>
+      <stop offset="100%" stop-color="#0a3aa0"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#eaf3ff"/>
+  <path d="M100 30c10 26-14 30-14 50 0 12 8 18 8 18-16-4-26-18-26-34 0-8 3-15 3-15-16 10-24 28-24 46 0 30 24 52 53 52s53-22 53-52c0-30-22-48-30-58 2 10-2 20-10 24 4-12-3-22-13-31z" fill="url(#flameGradBlue)" stroke="#082a72" stroke-width="4"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="900" text-anchor="middle">
+    <rect x="118" y="140" width="66" height="36" rx="12" fill="#082a72"/>
+    <text x="151" y="165" font-size="20" fill="#eaf6ff">x3!</text>
+  </g>
+</svg>

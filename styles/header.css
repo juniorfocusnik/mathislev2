@@ -1,0 +1,40 @@
+nav {
+  display: flex;
+  position: fixed;
+  justify-content: space-between;
+  align-items: center;
+  padding: 40px 5%;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: beige;
+  box-shadow: 0 5px 10px grey;
+  font-family: Arial, Helvetica, sans-serif;
+  text-shadow: 0 0 10px black;
+  font-size: 20px;
+  z-index: 100;
+  /*
+    Pablo P: 67
+    Ronny: 6767
+  */
+}
+
+nav a {
+  text-decoration: none;
+  color: blue;
+  font-weight: bold;
+}
+
+nav .token-count {
+  display: flex;
+  align-items: center;
+}
+
+.token-count-img {
+  width: 25px;
+}
+
+main {
+  margin-top: 105px;
+  font-size: 16px;
+}

@@ -1,0 +1,20 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rainbowStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff3b3b"/>
+      <stop offset="20%" stop-color="#ff9d1f"/>
+      <stop offset="40%" stop-color="#ffe94d"/>
+      <stop offset="60%" stop-color="#4dff8a"/>
+      <stop offset="80%" stop-color="#4dc9ff"/>
+      <stop offset="100%" stop-color="#a24dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#fff8f0"/>
+  <path d="M100 28c-42 0-76 30-76 68 0 26 20 34 38 34 10 0 14-6 14-13 0-8-7-11-7-20 0-11 14-19 31-19 34 0 60-22 60-46 0-13-25-24-60-24z" fill="#fdf4ff" stroke="url(#rainbowStroke)" stroke-width="7"/>
+  <circle cx="66" cy="78" r="13" fill="#ff3b3b"/>
+  <circle cx="92" cy="56" r="13" fill="#ff9d1f"/>
+  <circle cx="122" cy="52" r="13" fill="#ffe94d"/>
+  <circle cx="148" cy="70" r="13" fill="#4dff8a"/>
+  <circle cx="152" cy="106" r="13" fill="#4dc9ff"/>
+  <circle cx="76" cy="112" r="10" fill="#a24dff"/>
+</svg>

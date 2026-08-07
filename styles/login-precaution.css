@@ -1,0 +1,16 @@
+.login-precaution {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  margin-top: 26px;
+  background-color: rgb(248, 248, 248);
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px black;
+}
+
+.login-precaution-link a {
+  color: blue;
+  font-weight: bold;
+  text-decoration: none;
+  text-shadow: 0 0 10px black;
+}

@@ -1,0 +1,19 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="clockGrad30" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#e9f4ff"/>
+      <stop offset="60%" stop-color="#5f9ed6"/>
+      <stop offset="100%" stop-color="#1f5a9a"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="184" height="184" rx="24" fill="#e9f4ff"/>
+  <rect x="90" y="24" width="20" height="14" rx="4" fill="#1f5a9a"/>
+  <circle cx="100" cy="108" r="72" fill="url(#clockGrad30)" stroke="#0f3d6b" stroke-width="6"/>
+  <line x1="100" y1="108" x2="100" y2="58" stroke="#0c2a4a" stroke-width="7" stroke-linecap="round"/>
+  <line x1="100" y1="108" x2="140" y2="108" stroke="#0c2a4a" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="100" cy="108" r="7" fill="#0c2a4a"/>
+  <g font-family="Arial, Helvetica, sans-serif" font-weight="900" text-anchor="middle">
+    <rect x="118" y="140" width="70" height="36" rx="12" fill="#0c2a4a"/>
+    <text x="153" y="165" font-size="22" fill="#e9f4ff">+30s</text>
+  </g>
+</svg>
