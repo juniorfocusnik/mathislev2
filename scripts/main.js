@@ -1,6 +1,6 @@
 import { renderShop, renderEquipPalettePage, applyPalette } from './token-shop.js';
 import { runGame } from './game-difficulties/game-engine.js';
-import { logIn, logOut, watchAuthState } from './auth.js';
+import { logIn, logOut, watchAuthState, getAllUserTokens } from './auth.js';
 
 function setTokens() {
   document.querySelector('.token-count').innerHTML = `TOKENS: ${tokens}<img src="icons/token.png" class="token-count-img">`;
@@ -19,8 +19,13 @@ const tit = '<div class="home-title">';
 const lib = '<img class="library-image" src="images/library-images/n';
 const libEnd = '.png">';
 
+// Client-side gate for the ?page=admin token dashboard. This only hides the
+// UI from casual visitors — see the "allow list" note in auth.js for why
+// it isn't real server-side security.
+const ADMIN_PASSWORD = "[.OFHmzaxGq9bCwb{QBc5R3%W[&TrSpMM-U.Dzrp0'wM.!yzLo";
+
 function renderPage() {
-if (accountName === null && urlParams.get('page') !== 'login') {
+if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('page') !== 'admin') {
   document.querySelector('main').innerHTML = `<div class="login-precaution">Please <a href="index.html?page=login">log in</a> to play Mathisle-v2. Your tokens, boosts and palettes are stored on your account.</div>`
 } else if (accountName !== null && urlParams.get('page') === 'login') {
   document.querySelector('main').innerHTML = `<div class="login"><div class="login-title">Come back to the homepage!<br>You are already logged in as ${accountName}.</div></div>`
@@ -35,6 +40,40 @@ if (accountName === null && urlParams.get('page') !== 'login') {
   `;
   localStorage.setItem('shoutoutdone', 'false');
   applyPalette("default");
+} else if (urlParams.get('page') === 'admin') {
+  document.querySelector('main').innerHTML = `
+      <div class="home">
+        ${tit}Admin: Token Dashboard</div>
+        ${sec}Enter the admin password to view everyone's token counts.</div>
+        <input class="login-inputbox" type="password" id="admin-password" placeholder="Admin password...">
+        <button class="login-finish" id="admin-unlock-btn">Unlock</button>
+        <div class="login-secondary" id="admin-error"></div>
+        <div id="admin-results"></div>
+      </div>
+  `;
+  document.querySelector('#admin-unlock-btn').addEventListener('click', async () => {
+    const entered = document.querySelector('#admin-password').value;
+    const errorEl = document.querySelector('#admin-error');
+    const resultsEl = document.querySelector('#admin-results');
+    errorEl.textContent = '';
+    if (entered !== ADMIN_PASSWORD) {
+      errorEl.textContent = 'Incorrect password.';
+      return;
+    }
+    resultsEl.innerHTML = 'Loading...';
+    try {
+      const users = await getAllUserTokens();
+      resultsEl.innerHTML = `
+        <table class="admin-table">
+          <tr><th>Name</th><th>Tokens</th></tr>
+          ${users.map((u) => `<tr><td>${u.username}</td><td>${u.tokens}</td></tr>`).join('')}
+        </table>
+      `;
+    } catch (err) {
+      resultsEl.innerHTML = '';
+      errorEl.textContent = `Couldn't load tokens: ${err.message}`;
+    }
+  });
 } else if (urlParams.get('page') === 'home') {
   document.querySelector('main').innerHTML = `
       <div class="home">
