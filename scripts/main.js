@@ -1728,6 +1728,19 @@ function formatDuration(ms) {
   return `${h}h ${m}m`;
 }
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// toLocaleString() alone can render the year in a way that's easy to miss
+// (or, depending on locale, drop it entirely) — spell it out explicitly so
+// the admin dashboard's game log is always unambiguous.
+function formatTimestamp(ts) {
+  const d = new Date(ts);
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${day} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${hours}:${minutes}`;
+}
+
 function buildAdminDetailHtml(u, grantOptionsHtml) {
   const totalGames = u.gameHistory.length;
   const totalCorrect = u.gameHistory.reduce((s, g) => s + (g.correct || 0), 0);
@@ -1752,7 +1765,7 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
       <td>${g.wrong}</td>
       <td>${g.tokensEarned}</td>
       <td>${g.cheated ? `Yes (-${g.tokensLost || 0})` : 'No'}</td>
-      <td>${new Date(g.timestamp).toLocaleString()}</td>
+      <td>${formatTimestamp(g.timestamp)}</td>
     </tr>
   `).join('');
 
