@@ -78,6 +78,21 @@ function isTimedBoostActive(id) {
   return Date.now() < (Number(localStorage.getItem('expiry_' + id + '_10h')) || 0);
 }
 
+// Appends one finished game to a capped history log, synced to Firebase like
+// everything else — this is what the admin dashboard's per-player stats and
+// game log are built from.
+function recordGameResult(entry) {
+  let history = [];
+  try {
+    history = JSON.parse(localStorage.getItem('gameHistory')) || [];
+  } catch {
+    history = [];
+  }
+  history.push(entry);
+  if (history.length > 200) history = history.slice(-200);
+  localStorage.setItem('gameHistory', JSON.stringify(history));
+}
+
 function runGame(config) {
   const permanentMultiplier = Number(localStorage.getItem('tokenMultiplier')) || 1;
   const timedMultiplier = isTimedBoostActive('x3tokens') ? 3 : isTimedBoostActive('x2tokens') ? 2 : 1;
@@ -198,6 +213,15 @@ function runGame(config) {
     window.removeEventListener('focus', onWindowFocus);
 
     const deducted = penalizeTabSwitch();
+    recordGameResult({
+      difficulty: config.key,
+      correct: correctCount,
+      wrong: questionsDone - correctCount,
+      tokensEarned: runTokensEarned,
+      cheated: true,
+      tokensLost: deducted,
+      timestamp: Date.now()
+    });
     alert(`Cheating detected! You switched tabs or windows during the game.\n\nYou lost ${deducted} tokens.\n\nYou are being redirected back home.`);
     window.location.href = 'index.html?page=home';
   }
@@ -308,6 +332,15 @@ function runGame(config) {
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('blur', onWindowBlur);
     window.removeEventListener('focus', onWindowFocus);
+
+    recordGameResult({
+      difficulty: config.key,
+      correct: correctCount,
+      wrong: questionsDone - correctCount,
+      tokensEarned: runTokensEarned,
+      cheated: false,
+      timestamp: Date.now()
+    });
 
     document.querySelector('main').innerHTML = `
       <div class="home">
