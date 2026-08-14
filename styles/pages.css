@@ -60,6 +60,93 @@
   background-color: rgb(230, 230, 230);
 }
 
+.admin-dashboard {
+  background-color: rgb(248, 248, 248);
+  display: block;
+  width: 95%;
+  max-width: 1600px;
+  padding: 20px;
+  border-radius: 8px;
+  margin: 20px auto;
+  box-shadow: 0 0 10px black;
+}
+
+.admin-leaderboard {
+  width: 100%;
+}
+
+.admin-leaderboard > tr > td,
+.admin-leaderboard > tr > th {
+  width: auto;
+}
+
+.admin-detail-row td {
+  background-color: rgb(240, 240, 240);
+  padding: 15px;
+}
+
+.admin-detail-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 25px;
+  text-align: left;
+}
+
+.admin-detail-col {
+  flex: 1 1 300px;
+  min-width: 280px;
+}
+
+.admin-detail-col h4 {
+  margin-top: 14px;
+  margin-bottom: 4px;
+}
+
+.admin-detail-col h4:first-child {
+  margin-top: 0;
+}
+
+.admin-detail-col .admin-table {
+  width: 100%;
+  font-size: 14px;
+}
+
+.admin-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-token-input {
+  width: 90px;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid grey;
+}
+
+.admin-action-row button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid grey;
+  cursor: pointer;
+}
+
+.admin-action-row select {
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid grey;
+  max-width: 220px;
+}
+
+.admin-toggle-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid grey;
+  cursor: pointer;
+}
+
 .flex-dificulty .home-secondary {
   font-size: medium;
   width: 80%;
