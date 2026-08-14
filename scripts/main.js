@@ -1,6 +1,6 @@
-import { renderShop, renderEquipPalettePage, applyPalette } from './token-shop.js';
+import { renderShop, renderEquipPalettePage, applyPalette, PERMANENT_BOOSTS, TIMED_BOOSTS, ALL_PALETTES } from './token-shop.js';
 import { runGame } from './game-difficulties/game-engine.js';
-import { logIn, logOut, watchAuthState, getAllUserTokens } from './auth.js';
+import { logIn, logOut, watchAuthState, getAllUserData, adminAdjustTokens, adminGrantItem } from './auth.js';
 
 function setTokens() {
   document.querySelector('.token-count').innerHTML = `TOKENS: ${tokens}<img src="icons/token.png" class="token-count-img">`;
@@ -43,36 +43,22 @@ if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('
 } else if (urlParams.get('page') === 'admin') {
   document.querySelector('main').innerHTML = `
       <div class="home">
-        ${tit}Admin: Token Dashboard</div>
-        ${sec}Enter the admin password to view everyone's token counts.</div>
+        ${tit}Admin: Player Dashboard</div>
+        ${sec}Enter the admin password to view the leaderboard and everyone's stats.</div>
         <input class="login-inputbox" type="password" id="admin-password" placeholder="Admin password...">
         <button class="login-finish" id="admin-unlock-btn">Unlock</button>
         <div class="login-secondary" id="admin-error"></div>
-        <div id="admin-results"></div>
       </div>
+      <div id="admin-results"></div>
   `;
-  document.querySelector('#admin-unlock-btn').addEventListener('click', async () => {
+  document.querySelector('#admin-unlock-btn').addEventListener('click', () => {
     const entered = document.querySelector('#admin-password').value;
-    const errorEl = document.querySelector('#admin-error');
-    const resultsEl = document.querySelector('#admin-results');
-    errorEl.textContent = '';
     if (entered !== ADMIN_PASSWORD) {
-      errorEl.textContent = 'Incorrect password.';
+      document.querySelector('#admin-error').textContent = 'Incorrect password.';
       return;
     }
-    resultsEl.innerHTML = 'Loading...';
-    try {
-      const users = await getAllUserTokens();
-      resultsEl.innerHTML = `
-        <table class="admin-table">
-          <tr><th>Name</th><th>Tokens</th></tr>
-          ${users.map((u) => `<tr><td>${u.username}</td><td>${u.tokens}</td></tr>`).join('')}
-        </table>
-      `;
-    } catch (err) {
-      resultsEl.innerHTML = '';
-      errorEl.textContent = `Couldn't load tokens: ${err.message}`;
-    }
+    document.querySelector('#admin-error').textContent = '';
+    unlockAdminDashboard();
   });
 } else if (urlParams.get('page') === 'home') {
   document.querySelector('main').innerHTML = `
@@ -1646,6 +1632,246 @@ if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('
       </div>
   `;
 }
+}
+
+// ============================================================
+// ADMIN DASHBOARD (?page=admin)
+// ============================================================
+// Everything below builds the password-gated leaderboard + per-player stats
+// + give/remove-tokens + free-grant-item panel. See auth.js for the
+// Firestore-side functions (getAllUserData, adminAdjustTokens, adminGrantItem)
+// and its comment on why the password only gates the UI, not the data.
+
+const DIFFICULTY_LABELS = {
+  normal: 'Normal',
+  hard: 'Hard',
+  master: 'Master',
+  easyDenys: 'Easy Denys',
+  ultimateDenys: 'Ultimate Denys'
+};
+
+const GRANTABLE_ITEMS = [
+  ...PERMANENT_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'permanent-boost' })),
+  ...TIMED_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'timed-boost' })),
+  ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette' }))
+];
+
+async function unlockAdminDashboard(openUid) {
+  const resultsEl = document.querySelector('#admin-results');
+  const errorEl = document.querySelector('#admin-error');
+  if (!resultsEl) return; // navigated away before this resolved
+  resultsEl.innerHTML = 'Loading...';
+  try {
+    const users = await getAllUserData();
+    resultsEl.innerHTML = renderAdminDashboardHtml(users);
+    wireAdminDashboard();
+    if (openUid) {
+      const row = document.querySelector(`#admin-detail-${cssEscape(openUid)}`);
+      if (row) row.style.display = '';
+    }
+  } catch (err) {
+    resultsEl.innerHTML = '';
+    if (errorEl) errorEl.textContent = `Couldn't load data: ${err.message}`;
+  }
+}
+
+// Firestore UIDs are plain alphanumerics, but querySelector needs escaping
+// to be safe if that ever changes.
+function cssEscape(id) {
+  return window.CSS && CSS.escape ? CSS.escape(id) : id;
+}
+
+function renderAdminDashboardHtml(users) {
+  const grantOptionsHtml = GRANTABLE_ITEMS.map(i => `<option value="${i.category}|${i.id}">${i.name}</option>`).join('');
+
+  const rows = users.map((u, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${u.username}</td>
+      <td>${u.tokens}</td>
+      <td><button class="admin-toggle-btn" data-uid="${u.uid}">Details ▾</button></td>
+    </tr>
+    <tr class="admin-detail-row" id="admin-detail-${u.uid}" style="display:none">
+      <td colspan="4">${buildAdminDetailHtml(u, grantOptionsHtml)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="admin-dashboard">
+      <table class="admin-table admin-leaderboard">
+        <tr><th>#</th><th>Name</th><th>Tokens</th><th></th></tr>
+        ${rows}
+      </table>
+    </div>
+  `;
+}
+
+function isPermanentBoostOwned(u, id) {
+  switch (id) {
+    case 'x2tokens': return u.tokenMultiplier >= 2;
+    case 'x3tokens': return u.tokenMultiplier >= 3;
+    case 'extra15': return u.extraSeconds >= 15;
+    case 'extra30': return u.extraSeconds >= 30;
+    case 'streakbonus': return u.streakInterval > 0 && u.streakInterval <= 5;
+    case 'streakmaster': return u.streakInterval > 0 && u.streakInterval <= 3;
+    case 'secondchance': return u.powerup_secondchance;
+    case 'comebackbonus': return u.powerup_comeback;
+    case 'luckybonus': return u.powerup_lucky;
+    default: return false;
+  }
+}
+
+function formatDuration(ms) {
+  const totalMinutes = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
+}
+
+function buildAdminDetailHtml(u, grantOptionsHtml) {
+  const totalGames = u.gameHistory.length;
+  const totalCorrect = u.gameHistory.reduce((s, g) => s + (g.correct || 0), 0);
+  const totalWrong = u.gameHistory.reduce((s, g) => s + (g.wrong || 0), 0);
+
+  const perDifficulty = {};
+  Object.keys(DIFFICULTY_LABELS).forEach((key) => { perDifficulty[key] = { correct: 0, wrong: 0 }; });
+  u.gameHistory.forEach((g) => {
+    if (!perDifficulty[g.difficulty]) perDifficulty[g.difficulty] = { correct: 0, wrong: 0 };
+    perDifficulty[g.difficulty].correct += g.correct || 0;
+    perDifficulty[g.difficulty].wrong += g.wrong || 0;
+  });
+  const difficultyRows = Object.keys(DIFFICULTY_LABELS).map((key) => {
+    const d = perDifficulty[key];
+    return `<tr><td>${DIFFICULTY_LABELS[key]}</td><td>${d.correct + d.wrong}</td><td>${d.correct}</td><td>${d.wrong}</td></tr>`;
+  }).join('');
+
+  const recentGamesRows = [...u.gameHistory].reverse().slice(0, 15).map((g) => `
+    <tr>
+      <td>${DIFFICULTY_LABELS[g.difficulty] || g.difficulty}</td>
+      <td>${g.correct}</td>
+      <td>${g.wrong}</td>
+      <td>${g.tokensEarned}</td>
+      <td>${g.cheated ? `Yes (-${g.tokensLost || 0})` : 'No'}</td>
+      <td>${new Date(g.timestamp).toLocaleString()}</td>
+    </tr>
+  `).join('');
+
+  const purchaseCounts = {};
+  u.purchaseHistory.forEach((p) => { purchaseCounts[p.name] = (purchaseCounts[p.name] || 0) + 1; });
+  const purchaseRows = Object.keys(purchaseCounts).length
+    ? Object.entries(purchaseCounts).map(([name, count]) => `<tr><td>${name}</td><td>${count}</td></tr>`).join('')
+    : '<tr><td colspan="2">No purchases yet.</td></tr>';
+
+  const foreverRows = PERMANENT_BOOSTS.map((b) => {
+    const owned = isPermanentBoostOwned(u, b.id);
+    return `<tr><td>${b.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
+  }).join('');
+
+  const now = Date.now();
+  const timedRows = TIMED_BOOSTS.map((b) => {
+    const expiry = Number(u.raw['expiry_' + b.id]) || 0;
+    const active = now < expiry;
+    if (!active) return `<tr><td>${b.name}</td><td>Not active</td><td>—</td><td>—</td></tr>`;
+    const remainingMs = expiry - now;
+    const usedMs = (10 * 60 * 60 * 1000) - remainingMs;
+    return `<tr><td>${b.name}</td><td>Active</td><td>${formatDuration(usedMs)}</td><td>${formatDuration(remainingMs)}</td></tr>`;
+  }).join('');
+
+  return `
+    <div class="admin-detail-panel">
+      <div class="admin-detail-col">
+        <h4>Overview</h4>
+        <div class="home-secondary">Games played: ${totalGames}</div>
+        <div class="home-secondary">Correct: ${totalCorrect} | Wrong: ${totalWrong}</div>
+
+        <h4>By Difficulty</h4>
+        <table class="admin-table">
+          <tr><th>Difficulty</th><th>Asked</th><th>Correct</th><th>Wrong</th></tr>
+          ${difficultyRows}
+        </table>
+
+        <h4>Recent Games (last 15)</h4>
+        <table class="admin-table">
+          <tr><th>Difficulty</th><th>Correct</th><th>Wrong</th><th>Tokens</th><th>Cheated</th><th>When</th></tr>
+          ${recentGamesRows || '<tr><td colspan="6">No games played yet.</td></tr>'}
+        </table>
+      </div>
+
+      <div class="admin-detail-col">
+        <h4>Purchases</h4>
+        <table class="admin-table">
+          <tr><th>Item</th><th>Times Bought</th></tr>
+          ${purchaseRows}
+        </table>
+
+        <h4>Forever Boosts</h4>
+        <table class="admin-table">
+          <tr><th>Boost</th><th>Status</th></tr>
+          ${foreverRows}
+        </table>
+
+        <h4>10-Hour Boosts</h4>
+        <table class="admin-table">
+          <tr><th>Boost</th><th>Status</th><th>Used</th><th>Remaining</th></tr>
+          ${timedRows}
+        </table>
+
+        <h4>Palettes Owned (${u.ownedPalettes.length})</h4>
+        <div class="home-secondary">${u.ownedPalettes.join(', ') || 'None'}</div>
+      </div>
+
+      <div class="admin-detail-col">
+        <h4>Admin Actions</h4>
+        <div class="admin-action-row">
+          <input type="number" class="admin-token-input" id="admin-token-amount-${u.uid}" placeholder="Amount" min="0">
+          <button class="admin-give-btn" data-uid="${u.uid}">Give Tokens</button>
+          <button class="admin-remove-btn" data-uid="${u.uid}">Remove Tokens</button>
+        </div>
+        <div class="admin-action-row">
+          <select class="admin-grant-select" id="admin-grant-select-${u.uid}">${grantOptionsHtml}</select>
+          <button class="admin-grant-btn" data-uid="${u.uid}">Grant Free</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function wireAdminDashboard() {
+  document.querySelectorAll('.admin-toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = document.querySelector(`#admin-detail-${cssEscape(btn.dataset.uid)}`);
+      row.style.display = row.style.display === 'none' ? '' : 'none';
+    });
+  });
+
+  document.querySelectorAll('.admin-give-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const uid = btn.dataset.uid;
+      const amount = Number(document.querySelector(`#admin-token-amount-${cssEscape(uid)}`).value);
+      if (!amount || amount <= 0) return;
+      await adminAdjustTokens(uid, amount);
+      unlockAdminDashboard(uid);
+    });
+  });
+
+  document.querySelectorAll('.admin-remove-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const uid = btn.dataset.uid;
+      const amount = Number(document.querySelector(`#admin-token-amount-${cssEscape(uid)}`).value);
+      if (!amount || amount <= 0) return;
+      await adminAdjustTokens(uid, -amount);
+      unlockAdminDashboard(uid);
+    });
+  });
+
+  document.querySelectorAll('.admin-grant-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const uid = btn.dataset.uid;
+      const [category, id] = document.querySelector(`#admin-grant-select-${cssEscape(uid)}`).value.split('|');
+      await adminGrantItem(uid, category, id);
+      unlockAdminDashboard(uid);
+    });
+  });
 }
 
 function showAuthError(message) {
