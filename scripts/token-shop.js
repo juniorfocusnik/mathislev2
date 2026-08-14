@@ -295,6 +295,20 @@ function getOwnedPalettes() {
   }
 }
 
+// Appends one purchase to a capped history log, synced to Firebase — this is
+// what the admin dashboard's "how many of each thing bought" counts come from.
+function recordPurchase(item, category) {
+  let history = [];
+  try {
+    history = JSON.parse(localStorage.getItem('purchaseHistory')) || [];
+  } catch {
+    history = [];
+  }
+  history.push({ id: item.id, name: item.name, category, price: item.price, timestamp: Date.now() });
+  if (history.length > 300) history = history.slice(-300);
+  localStorage.setItem('purchaseHistory', JSON.stringify(history));
+}
+
 function applyPalette(id) {
   document.body.classList.forEach(cls => {
     if (cls.startsWith('theme-')) document.body.classList.remove(cls);
@@ -409,13 +423,13 @@ function onButtonClick(e) {
 
   if (action === 'buy-permanent-boost') {
     const item = PERMANENT_BOOSTS.find(b => b.id === id);
-    buyOneTimeItem(item, item.apply);
+    buyOneTimeItem(item, 'permanent-boost', item.apply);
   } else if (action === 'buy-timed-boost') {
     const item = TIMED_BOOSTS.find(b => b.id === id);
     buyTimedBoost(item);
   } else if (action === 'buy-palette') {
     const item = ALL_PALETTES.find(p => p.id === id);
-    buyOneTimeItem(item, () => {
+    buyOneTimeItem(item, 'palette', () => {
       const owned = getOwnedPalettes();
       owned.push(item.id);
       localStorage.setItem('ownedPalettes', JSON.stringify(owned));
@@ -433,19 +447,21 @@ function buyTimedBoost(item) {
     return;
   }
   activateBoost(item.id);
+  recordPurchase(item, 'timed-boost');
   const expiryTime = new Date(getBoostExpiry(item.id)).toLocaleTimeString();
   alert(`Purchased "${item.name}"! Active until ${expiryTime}.`);
   notifyPurchase();
   renderShop();
 }
 
-function buyOneTimeItem(item, onSuccess) {
+function buyOneTimeItem(item, category, onSuccess) {
   if (!confirm(`Buy "${item.name}" for ${item.price} tokens?`)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
     return;
   }
   onSuccess();
+  recordPurchase(item, category);
   alert(`Purchased "${item.name}"!`);
   notifyPurchase();
   renderShop();
@@ -457,6 +473,7 @@ function buyTutoring(item) {
     alert("You don't have enough tokens for that yet!");
     return;
   }
+  recordPurchase(item, 'tutoring');
 
   console.log("%c[TUTORING 1] buyTutoring function started!", "color: cyan; font-weight: bold;");
 
@@ -565,4 +582,4 @@ function renderPaletteTile(item, owned, active) {
   `;
 }
 
-export { renderShop, renderEquipPalettePage, applyPalette };
+export { renderShop, renderEquipPalettePage, applyPalette, PERMANENT_BOOSTS, TIMED_BOOSTS, ALL_PALETTES };
