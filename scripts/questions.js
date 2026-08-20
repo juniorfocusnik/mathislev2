@@ -272,7 +272,7 @@ const t1_primary = [
     const digits = String(n).split("").reverse(); // [units, tens, hundreds, thousands]
     const idx = places.indexOf(place);
     return {
-      text: `In the number ${n}, what digit is in the ${place} column?`,
+      text: `In the number ${n}, what digit is in the ${place} column? Name the digit itself.`,
       answer: `${digits[idx]}`
     };
   },
@@ -317,13 +317,13 @@ const t1_primary = [
     if (a === b || b === c || a === c) {
       // fallback simple distinct set if collision happens
       return {
-        text: `Order these numbers from smallest to largest: 5, 12, 3`,
+        text: `Order these numbers from smallest to largest: 5, 12, 3. Separate the numbers with ", " exactly.`,
         answer: "3, 5, 12"
       };
     }
     const sorted = [a, b, c].sort((x, y) => x - y);
     return {
-      text: `Order these numbers from smallest to largest: ${a}, ${b}, ${c}`,
+      text: `Order these numbers from smallest to largest: ${a}, ${b}, ${c}. Separate the numbers with ", " exactly.`,
       answer: sorted.join(", ")
     };
   }
@@ -343,7 +343,7 @@ const t2_algNotation = [
     const letter = randLetter();
     const n = randInt(2, 100);
     return {
-      text: `Write ${letter} divided by ${n} in algebraic notation, using / as the symbol.`,
+      text: `Write ${letter} divided by ${n} in algebraic notation, using / as the fraction's line.`,
       answer: `${letter}/${n}`
     };
   },
@@ -351,7 +351,7 @@ const t2_algNotation = [
     const letter = randLetter();
     const n = randInt(2, 100);
     return {
-      text: `Write ${n} divided by ${letter} in algebraic notation, using / as the symbol.`,
+      text: `Write ${n} divided by ${letter} in algebraic notation, using / as the fraction's line.`,
       answer: `${n}/${letter}`
     };
   },
@@ -371,7 +371,7 @@ const t2_algNotation = [
     const letter = randLetter();
     const n = randInt(2, 100);
     return {
-      text: `Write ${n} subtracted from ${letter} in algebraic notation.`,
+      text: `Write ${n} subtracted from ${letter} in algebraic notation. Write your answer without spaces.`,
       answer: `${letter}-${n}`
     };
   },
@@ -379,7 +379,7 @@ const t2_algNotation = [
     const letter = randLetter();
     const n = randInt(2, 100);
     return {
-      text: `Write ${letter} subtracted from ${n} in algebraic notation.`,
+      text: `Write ${letter} subtracted from ${n} in algebraic notation. Write your answer without spaces.`,
       answer: `${n}-${letter}`
     };
   }
@@ -431,7 +431,7 @@ const t3_angleCalc = [
     const base = randInt(10, 89);
     const apex = 180 - 2 * base;
     return {
-      text: `An isosceles triangle has two equal base angles of ${base} degrees each. What is the size of the third (apex) angle? _____ degrees`,
+      text: `An isosceles triangle has two equal angles of ${base} degrees each. What is the size of the third angle? _____ degrees`,
       answer: `${apex}`
     };
   },
@@ -453,7 +453,7 @@ const t3_angleCalc = [
   () => {
     const a = randInt(20, 160);
     return {
-      text: `A parallelogram has an angle of ${a} degrees. What is the size of the angle right next to it (adjacent)? _____ degrees`,
+      text: `A parallelogram has an angle of ${a} degrees. What is the size of the angle right next to it? _____ degrees`,
       answer: `${180 - a}`
     };
   },
@@ -461,7 +461,7 @@ const t3_angleCalc = [
   () => {
     const a = randInt(20, 160);
     return {
-      text: `A rhombus has an angle of ${a} degrees. What is the size of the angle opposite to it? _____ degrees`,
+      text: `A parallelogram has an angle of ${a} degrees. What is the size of the angle opposite to it? _____ degrees`,
       answer: `${a}`
     };
   },
@@ -471,8 +471,8 @@ const t3_angleCalc = [
     const b = randInt(20, 90);
     const c = 360 - a - 2 * b;
     return {
-      text: `A kite has angle A = ${a} degrees. The two angles between the unequal sides (B and D) are equal, at ${b} degrees each. What is the size of angle C? _____ degrees`,
-      answer: `${c}`
+      text: `A kite has the angle A, which is ${a} degrees and lies at the very top of the kite. The angle opposite to A (C) is ${c} degrees, down below. What is the size of angle B or D? _____ degrees`,
+      answer: `${b}`
     };
   },
   // ---- Arrowhead (concave kite / dart) ----
@@ -498,11 +498,11 @@ const t4_angleFacts = [
       ["A right angle is ___ degrees.", "90"]
     ];
     const f = randChoice(facts);
-    return { text: f[0], answer: f[1] };
+    return { text: "Answer this fact: " + f[0], answer: f[1] };
   },
   () => {
     return {
-      text: "Vertically opposite angles formed by two crossing lines are always: equal or supplementary?",
+      text: "Vertically opposite angles formed by two crossing lines are always: equal or add to 180 degrees?",
       answer: "equal"
     };
   }
@@ -591,7 +591,7 @@ const t6_charts = [
     const values = buildDistinctValues(n, 5, 29);
     const sum = values.reduce((a, b) => a + b, 0);
     const listStr = labels.map((l, i) => `${l}: ${values[i]}`).join(", ");
-    const qType = randChoice(["total", "missing", "difference", "most", "least", "squares"]);
+    const qType = randChoice(["total", "missing", "difference", "most", "least"]);
 
     if (qType === "total") {
       return {
@@ -621,25 +621,17 @@ const t6_charts = [
     if (qType === "most") {
       const maxVal = Math.max(...values);
       return {
-        text: `A bar chart shows ${theme.phrase} each of these: ${listStr}. Which got the most votes?`,
+        text: `A bar chart shows ${theme.phrase} each of these: ${listStr}. Which category got the most votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(maxVal)]}`
       };
     }
     if (qType === "least") {
       const minVal = Math.min(...values);
       return {
-        text: `A bar chart shows ${theme.phrase} each of these: ${listStr}. Which got the least votes?`,
+        text: `A bar chart shows ${theme.phrase} each of these: ${listStr}. Which category got the least votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(minVal)]}`
       };
     }
-    // squares
-    const label = randChoice(labels);
-    const key = randChoice([2, 4, 5, 10]);
-    const squares = randInt(2, 8);
-    return {
-      text: `On a bar chart, each square represents ${key} votes. The bar for ${label} is ${squares} squares tall. How many votes does it represent?`,
-      answer: `${key * squares}`
-    };
   },
 
   // ---- Pie chart ----
@@ -715,14 +707,14 @@ const t6_charts = [
     if (qType === "most") {
       const maxVal = Math.max(...values);
       return {
-        text: `A pie chart shows ${theme.phrase} each of these: ${listStr}. Which got the most votes?`,
+        text: `A pie chart shows ${theme.phrase} each of these: ${listStr}. Which category got the most votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(maxVal)]}`
       };
     }
     if (qType === "least") {
       const minVal = Math.min(...values);
       return {
-        text: `A pie chart shows ${theme.phrase} each of these: ${listStr}. Which got the least votes?`,
+        text: `A pie chart shows ${theme.phrase} each of these: ${listStr}. Which category got the least votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(minVal)]}`
       };
     }
@@ -854,14 +846,14 @@ const t6_charts = [
     if (qType === "most") {
       const maxVal = Math.max(...values);
       return {
-        text: `A pictogram has a key: 1 person symbol = ${K} votes. It shows ${theme.phrase} each of these: ${listStr}. Which got the most votes?`,
+        text: `A pictogram has a key: 1 person symbol = ${K} votes. It shows ${theme.phrase} each of these: ${listStr}. Which category got the most votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(maxVal)]}`
       };
     }
     if (qType === "least") {
       const minVal = Math.min(...values);
       return {
-        text: `A pictogram has a key: 1 person symbol = ${K} votes. It shows ${theme.phrase} each of these: ${listStr}. Which got the least votes?`,
+        text: `A pictogram has a key: 1 person symbol = ${K} votes. It shows ${theme.phrase} each of these: ${listStr}. Which category got the least votes? Name it exactly how the word is shown.`,
         answer: `${labels[values.indexOf(minVal)]}`
       };
     }
