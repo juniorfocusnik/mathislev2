@@ -1,5 +1,5 @@
 import { getRandomQuestion } from '../questions.js';
-import { awardTokens, penalizeTabSwitch } from '../main.js';
+import { awardTokens, penalizeTabSwitch, isCompetitionFrozen } from '../main.js';
 
 // ============================================================
 // GAME ENGINE
@@ -94,6 +94,17 @@ function recordGameResult(entry) {
 }
 
 function runGame(config) {
+  if (isCompetitionFrozen()) {
+    document.querySelector('main').innerHTML = `
+      <div class="home">
+        <div class="home-title">Competition Ended</div>
+        <div class="home-secondary">The admin has frozen the competition while results are being gathered — games can't be played right now.</div>
+        <div class="home-secondary">Link back home: <a href="index.html?page=home">CLICK!</a></div>
+      </div>
+    `;
+    return;
+  }
+
   const permanentMultiplier = Number(localStorage.getItem('tokenMultiplier')) || 1;
   const timedMultiplier = isTimedBoostActive('x3tokens') ? 3 : isTimedBoostActive('x2tokens') ? 2 : 1;
   const tokenMultiplier = Math.max(permanentMultiplier, timedMultiplier);
