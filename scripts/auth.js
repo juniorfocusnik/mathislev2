@@ -1,12 +1,20 @@
-import { auth, db } from './firebase-config.js';
+import { auth, db, adminCreateAuth } from './firebase-config.js';
 import {
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
   signOut,
   onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import {
-  doc, getDoc, setDoc, collection, getDocs
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
+
+// A fake "user" document (in the same /users collection, so it's covered by
+// the same security rule with no extra Firestore rule needed) that holds
+// site-wide admin settings — currently just the competition freeze flag.
+// getAllUserData filters this id out so it never shows up as a player.
+const SETTINGS_DOC_ID = '_meta';
 
 // ============================================================
 // AUTH + CLOUD SYNC
@@ -122,8 +130,14 @@ function usernameToEmail(username) {
   return `${slug}@mathisle-v2.local`;
 }
 
-function logIn(username, password) {
-  return signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+async function logIn(username, password) {
+  const cred = await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+  const snap = await getDoc(doc(db, 'users', cred.user.uid));
+  if (snap.exists() && snap.data().disabled === true) {
+    await signOut(auth);
+    throw new Error('This account has been deleted by the admin.');
+  }
+  return cred;
 }
 
 async function logOut() {
@@ -159,6 +173,7 @@ async function getAllUserData() {
   const snap = await getDocs(collection(db, 'users'));
   const results = [];
   snap.forEach((docSnap) => {
+    if (docSnap.id === SETTINGS_DOC_ID) return;
     const data = docSnap.data();
     let gameHistory = [];
     let purchaseHistory = [];
@@ -232,4 +247,47 @@ async function adminGrantItem(uid, category, id) {
   await setDoc(doc(db, 'users', uid), updates, { merge: true });
 }
 
-export { logIn, logOut, watchAuthState, getAllUserData, adminAdjustTokens, adminGrantItem };
+// Admin-only: creates a brand-new classmate account. Uses the isolated
+// adminCreateAuth instance (see firebase-config.js) so this doesn't sign the
+// admin out of their own session — Firebase would otherwise auto-sign-in as
+// whichever account was just created.
+async function adminCreateAccount(username, password) {
+  const cred = await createUserWithEmailAndPassword(adminCreateAuth, usernameToEmail(username), password);
+  await updateProfile(cred.user, { displayName: username });
+  await setDoc(doc(db, 'users', cred.user.uid), { tokens: '0', ownedPalettes: '[]', username });
+  await signOut(adminCreateAuth);
+  return cred.user;
+}
+
+// Admin-only: wipes a player's progress (tokens, boosts, palettes, history)
+// and marks the account disabled so it can never log back in. This can't
+// remove their username/password from Firebase Authentication itself — doing
+// that requires the Admin SDK, which needs a real backend this static site
+// doesn't have — but it fully blocks the account from being used again and
+// clears it from the leaderboard/stats.
+async function adminDeleteAccount(uid) {
+  await deleteDoc(doc(db, 'users', uid));
+  await setDoc(doc(db, 'users', uid), { disabled: true });
+}
+
+// Site-wide switch for the admin to freeze the competition: once true, every
+// action that changes a token balance (playing a game, spending in the token
+// shop, tab-switch penalties) refuses to do anything — see the checks in
+// main.js's awardTokens/spendTokens/penalizeTabSwitch and token-shop.js/
+// game-engine.js's pre-action checks. Stored on the same shared "_meta" doc
+// as everything else admin-related.
+async function getCompetitionFrozen() {
+  const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
+  return snap.exists() && snap.data().competitionFrozen === true;
+}
+
+async function setCompetitionFrozen(frozen) {
+  await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { competitionFrozen: frozen }, { merge: true });
+}
+
+export {
+  logIn, logOut, watchAuthState,
+  getAllUserData, adminAdjustTokens, adminGrantItem,
+  adminCreateAccount, adminDeleteAccount,
+  getCompetitionFrozen, setCompetitionFrozen
+};
