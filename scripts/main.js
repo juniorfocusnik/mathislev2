@@ -60,6 +60,8 @@ if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('
     document.querySelector('#admin-error').textContent = '';
     unlockAdminDashboard();
   });
+} else if (!urlParams.get('page')) {
+  window.location.href = 'index.html?page=home';
 } else if (urlParams.get('page') === 'home') {
   document.querySelector('main').innerHTML = `
       <div class="home">
