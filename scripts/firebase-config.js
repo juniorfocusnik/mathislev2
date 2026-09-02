@@ -31,4 +31,14 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-export { auth, db };
+// A second, separately-named app instance pointed at the SAME project.
+// Creating a Firebase Auth user via createUserWithEmailAndPassword normally
+// signs the browser in as that new user — fine for a real signup page, but
+// disastrous for an admin creating an account for someone else, since it
+// would silently sign the admin out of their own session. Running the create
+// call against this isolated instance keeps the admin's real `auth` session
+// (above) completely untouched.
+const adminCreateApp = initializeApp(firebaseConfig, 'AdminCreateAccount');
+const adminCreateAuth = getAuth(adminCreateApp);
+
+export { auth, db, adminCreateAuth };
