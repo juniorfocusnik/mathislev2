@@ -1,6 +1,11 @@
 import { renderShop, renderEquipPalettePage, applyPalette, PERMANENT_BOOSTS, TIMED_BOOSTS, ALL_PALETTES } from './token-shop.js';
 import { runGame } from './game-difficulties/game-engine.js';
-import { logIn, logOut, watchAuthState, getAllUserData, adminAdjustTokens, adminGrantItem } from './auth.js';
+import {
+  logIn, logOut, watchAuthState,
+  getAllUserData, adminAdjustTokens, adminGrantItem,
+  adminCreateAccount, adminDeleteAccount,
+  getCompetitionFrozen, setCompetitionFrozen
+} from './auth.js';
 
 function setTokens() {
   document.querySelector('.token-count').innerHTML = `TOKENS: ${tokens}<img src="icons/token.png" class="token-count-img">`;
@@ -12,6 +17,15 @@ function setTokens() {
 // manual save step anymore.
 let accountName = null;
 let tokens = 0;
+// Refreshed on every page load from Firestore (see the watchAuthState
+// bootstrap at the bottom of this file). While true, awardTokens/spendTokens/
+// penalizeTabSwitch all become no-ops — the admin's "Freeze Competition"
+// switch, for locking scores in place while results are being gathered.
+// `var`, not `let`: game-engine.js imports isCompetitionFrozen and can call
+// it synchronously at its own module-load time (circular import), before
+// this line has run — `var`'s hoisting means that early read safely sees
+// `undefined` (falsy) instead of throwing a temporal-dead-zone error.
+var competitionFrozen = false;
 const urlParams = new URLSearchParams(window.location.search);
 
 const sec = '<div class="home-secondary">';
@@ -1658,14 +1672,90 @@ const GRANTABLE_ITEMS = [
   ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette' }))
 ];
 
+// A themed popup box (not the browser's plain confirm()/prompt()) used for
+// anything on the admin dashboard that needs a deliberate extra step —
+// deleting an account or creating one. `bodyHtml` can include its own input
+// fields; `onConfirm(overlay)` reads them off the overlay it's given. Throw
+// inside onConfirm to show an inline error and keep the box open instead of
+// closing it.
+function openMathisleModal({ title, bodyHtml, confirmLabel, danger, onConfirm }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'mathisle-modal-overlay';
+  overlay.innerHTML = `
+    <div class="mathisle-modal-box${danger ? ' mathisle-modal-danger' : ''}">
+      <div class="home-title">${title}</div>
+      <div class="mathisle-modal-body">${bodyHtml}</div>
+      <div class="login-secondary mathisle-modal-error"></div>
+      <div class="mathisle-modal-actions">
+        <button class="login-finish mathisle-modal-confirm">${confirmLabel}</button>
+        <button class="login-finish mathisle-modal-cancel">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector('.mathisle-modal-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const errorEl = overlay.querySelector('.mathisle-modal-error');
+  const confirmBtn = overlay.querySelector('.mathisle-modal-confirm');
+  confirmBtn.addEventListener('click', async () => {
+    confirmBtn.disabled = true;
+    try {
+      await onConfirm(overlay);
+      close();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      confirmBtn.disabled = false;
+    }
+  });
+
+  return overlay;
+}
+
+function openDeleteAccountModal(uid, username) {
+  openMathisleModal({
+    title: '⚠ Delete Account',
+    danger: true,
+    confirmLabel: 'Delete Forever',
+    bodyHtml: `
+      <p>You are about to permanently delete <b>${username}</b>'s Mathisle-v2 account.</p>
+      <p>This wipes their tokens, boosts, palettes and game history, and blocks that username from logging back in. This cannot be undone.</p>
+    `,
+    onConfirm: async () => {
+      await adminDeleteAccount(uid);
+      unlockAdminDashboard();
+    }
+  });
+}
+
+function openCreateAccountModal() {
+  openMathisleModal({
+    title: 'Create New Account',
+    confirmLabel: 'Create Account',
+    bodyHtml: `
+      <input class="login-inputbox" type="text" id="new-account-username" placeholder="Username...">
+      <input class="login-inputbox" type="password" id="new-account-password" placeholder="Password (min 6 characters)...">
+    `,
+    onConfirm: async (overlay) => {
+      const username = overlay.querySelector('#new-account-username').value.trim();
+      const password = overlay.querySelector('#new-account-password').value;
+      if (!username) throw new Error('Please enter a username.');
+      await adminCreateAccount(username, password);
+      unlockAdminDashboard();
+    }
+  });
+}
+
 async function unlockAdminDashboard(openUid) {
   const resultsEl = document.querySelector('#admin-results');
   const errorEl = document.querySelector('#admin-error');
   if (!resultsEl) return; // navigated away before this resolved
   resultsEl.innerHTML = 'Loading...';
   try {
-    const users = await getAllUserData();
-    resultsEl.innerHTML = renderAdminDashboardHtml(users);
+    const [users, frozen] = await Promise.all([getAllUserData(), getCompetitionFrozen()]);
+    resultsEl.innerHTML = renderAdminDashboardHtml(users, frozen);
     wireAdminDashboard();
     if (openUid) {
       const row = document.querySelector(`#admin-detail-${cssEscape(openUid)}`);
@@ -1683,7 +1773,7 @@ function cssEscape(id) {
   return window.CSS && CSS.escape ? CSS.escape(id) : id;
 }
 
-function renderAdminDashboardHtml(users) {
+function renderAdminDashboardHtml(users, frozen) {
   const grantOptionsHtml = GRANTABLE_ITEMS.map(i => `<option value="${i.category}|${i.id}">${i.name}</option>`).join('');
 
   const rows = users.map((u, i) => `
@@ -1691,7 +1781,10 @@ function renderAdminDashboardHtml(users) {
       <td>${i + 1}</td>
       <td>${u.username}</td>
       <td>${u.tokens}</td>
-      <td><button class="admin-toggle-btn" data-uid="${u.uid}">Details ▾</button></td>
+      <td>
+        <button class="admin-toggle-btn" data-uid="${u.uid}">Details ▾</button>
+        <button class="admin-delete-btn" data-uid="${u.uid}" data-username="${u.username}">Delete</button>
+      </td>
     </tr>
     <tr class="admin-detail-row" id="admin-detail-${u.uid}" style="display:none">
       <td colspan="4">${buildAdminDetailHtml(u, grantOptionsHtml)}</td>
@@ -1700,6 +1793,15 @@ function renderAdminDashboardHtml(users) {
 
   return `
     <div class="admin-dashboard">
+      <div class="admin-toolbar">
+        <button id="admin-create-account-btn" class="login-finish">+ Create New Account</button>
+        <button id="admin-freeze-btn" class="login-finish ${frozen ? 'admin-freeze-active' : ''}">
+          ${frozen ? 'Competition Frozen — Click to Unfreeze' : 'Freeze Competition'}
+        </button>
+      </div>
+      <div class="home-secondary">${frozen
+        ? 'Games, the token shop, and cheat penalties are all disabled right now — nobody\'s token count can change.'
+        : 'Everything is live — playing games and shopping still changes token counts normally.'}</div>
       <table class="admin-table admin-leaderboard">
         <tr><th>#</th><th>Name</th><th>Tokens</th><th></th></tr>
         ${rows}
@@ -1887,6 +1989,25 @@ function wireAdminDashboard() {
       unlockAdminDashboard(uid);
     });
   });
+
+  document.querySelectorAll('.admin-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openDeleteAccountModal(btn.dataset.uid, btn.dataset.username);
+    });
+  });
+
+  const createBtn = document.querySelector('#admin-create-account-btn');
+  if (createBtn) createBtn.addEventListener('click', openCreateAccountModal);
+
+  const freezeBtn = document.querySelector('#admin-freeze-btn');
+  if (freezeBtn) {
+    freezeBtn.addEventListener('click', async () => {
+      const nowFrozen = !freezeBtn.classList.contains('admin-freeze-active');
+      freezeBtn.disabled = true;
+      await setCompetitionFrozen(nowFrozen);
+      unlockAdminDashboard();
+    });
+  }
 }
 
 function showAuthError(message) {
@@ -1931,6 +2052,7 @@ function renderAuthStatus() {
 // Written straight to localStorage, which auth.js's Storage.prototype patch
 // picks up and syncs to Firebase automatically — no manual save step.
 function awardTokens(amount) {
+  if (competitionFrozen) return;
   tokens += amount;
   localStorage.setItem('tokens', String(tokens));
   setTokens();
@@ -1939,6 +2061,7 @@ function awardTokens(amount) {
 // Called by the game engine when a tab/window switch is caught during a game.
 // Returns the amount actually deducted (useful for the "you lost X tokens" message).
 function penalizeTabSwitch() {
+  if (competitionFrozen) return 0;
   const before = tokens;
   tokens = Math.max(0, tokens - 100);
   localStorage.setItem('tokens', String(tokens));
@@ -1957,9 +2080,17 @@ function getAccountName() {
   return accountName;
 }
 
+// Lets the game engine and token shop check the freeze switch up front, so
+// they can show an accurate "competition's over" message instead of a
+// misleading "not enough tokens" one.
+function isCompetitionFrozen() {
+  return competitionFrozen;
+}
+
 // Called by the token shop when the player buys something.
 // Returns true and deducts the cost if they can afford it, otherwise false (no change made).
 function spendTokens(amount) {
+  if (competitionFrozen) return false;
   if (tokens < amount) return false;
   tokens -= amount;
   localStorage.setItem('tokens', String(tokens));
@@ -1971,10 +2102,16 @@ function spendTokens(amount) {
 // again on every login/logout. By the time it fires, Firebase data (if any)
 // has already been pulled into localStorage, so tokens/theme reflect the
 // signed-in account before anything renders.
-watchAuthState((user) => {
+watchAuthState(async (user) => {
   accountName = user ? (user.displayName || user.email).split(' ')[0] : null;
   tokens = Number(localStorage.getItem('tokens')) || 0;
   setTokens();
+
+  try {
+    competitionFrozen = await getCompetitionFrozen();
+  } catch {
+    competitionFrozen = false;
+  }
 
   document.body.className = document.body.className.replace(/theme-\S+/g, '').trim();
   const activeTheme = localStorage.getItem('activeTheme');
@@ -1987,4 +2124,4 @@ watchAuthState((user) => {
   wireAuthForms();
 });
 
-export { awardTokens, penalizeTabSwitch, getTokens, getAccountName, spendTokens };
+export { awardTokens, penalizeTabSwitch, getTokens, getAccountName, spendTokens, isCompetitionFrozen };
