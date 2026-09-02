@@ -1,4 +1,4 @@
-import { getTokens, spendTokens, getAccountName } from './main.js';
+import { getTokens, spendTokens, getAccountName, isCompetitionFrozen } from './main.js';
 
 // ============================================================
 // TOKEN SHOP
@@ -441,6 +441,10 @@ function onButtonClick(e) {
 }
 
 function buyTimedBoost(item) {
+  if (isCompetitionFrozen()) {
+    alert("The competition has ended — the token shop is closed while results are being gathered.");
+    return;
+  }
   if (!confirm(`Buy "${item.name}" for ${item.price} tokens? It will be active for 10 hours.`)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
@@ -455,6 +459,10 @@ function buyTimedBoost(item) {
 }
 
 function buyOneTimeItem(item, category, onSuccess) {
+  if (isCompetitionFrozen()) {
+    alert("The competition has ended — the token shop is closed while results are being gathered.");
+    return;
+  }
   if (!confirm(`Buy "${item.name}" for ${item.price} tokens?`)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
@@ -468,6 +476,10 @@ function buyOneTimeItem(item, category, onSuccess) {
 }
 
 function buyTutoring(item) {
+  if (isCompetitionFrozen()) {
+    alert("The competition has ended — the token shop is closed while results are being gathered.");
+    return;
+  }
   if (!confirm(`Book "${item.name}" for ${item.price} tokens?`)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
