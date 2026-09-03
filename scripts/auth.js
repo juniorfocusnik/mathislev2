@@ -178,9 +178,11 @@ async function getAllUserData() {
     let gameHistory = [];
     let purchaseHistory = [];
     let ownedPalettes = [];
+    let adminLog = [];
     try { gameHistory = JSON.parse(data.gameHistory) || []; } catch {}
     try { purchaseHistory = JSON.parse(data.purchaseHistory) || []; } catch {}
     try { ownedPalettes = JSON.parse(data.ownedPalettes) || []; } catch {}
+    try { adminLog = JSON.parse(data.adminLog) || []; } catch {}
     results.push({
       uid: docSnap.id,
       username: data.username || '(never logged in)',
@@ -194,6 +196,7 @@ async function getAllUserData() {
       ownedPalettes,
       gameHistory,
       purchaseHistory,
+      adminLog,
       raw: data
     });
   });
@@ -201,21 +204,43 @@ async function getAllUserData() {
   return results;
 }
 
+// Appends one entry to a player's admin-changes log (capped, newest last —
+// callers/renderers sort by timestamp for display). Stored on the same doc
+// as everything else about that player.
+function appendAdminLog(data, entry) {
+  let log = [];
+  try { log = JSON.parse(data.adminLog) || []; } catch {}
+  log.push(entry);
+  if (log.length > 200) log = log.slice(-200);
+  return JSON.stringify(log);
+}
+
 // Admin-only: adds (or, with a negative amount, removes) tokens from a
 // specific player's account, clamped so it never goes below 0. Returns the
-// resulting balance.
+// resulting balance. Logs the actual (post-clamp) change for the admin
+// dashboard's per-player change history and site-wide totals.
 async function adminAdjustTokens(uid, delta) {
   const snap = await getDoc(doc(db, 'users', uid));
-  const current = snap.exists() ? Number(snap.data().tokens) || 0 : 0;
+  const data = snap.exists() ? snap.data() : {};
+  const current = Number(data.tokens) || 0;
   const next = Math.max(0, current + delta);
-  await setDoc(doc(db, 'users', uid), { tokens: String(next) }, { merge: true });
+  const actualDelta = next - current;
+  if (actualDelta === 0) return next;
+
+  const adminLog = appendAdminLog(data, {
+    type: actualDelta > 0 ? 'tokens-given' : 'tokens-removed',
+    amount: Math.abs(actualDelta),
+    timestamp: Date.now()
+  });
+  await setDoc(doc(db, 'users', uid), { tokens: String(next), adminLog }, { merge: true });
   return next;
 }
 
 // Admin-only: grants a boost or palette to a player for free, without
 // touching their tokens. `category` is 'permanent-boost' | 'timed-boost' |
-// 'palette', `id` is the item's id from token-shop.js's item lists.
-async function adminGrantItem(uid, category, id) {
+// 'palette', `id` is the item's id from token-shop.js's item lists, `name`
+// is its display name (for the admin log entry).
+async function adminGrantItem(uid, category, id, name) {
   const snap = await getDoc(doc(db, 'users', uid));
   const data = snap.exists() ? snap.data() : {};
   const updates = {};
@@ -243,6 +268,13 @@ async function adminGrantItem(uid, category, id) {
     if (!owned.includes(id)) owned.push(id);
     updates.ownedPalettes = JSON.stringify(owned);
   }
+
+  updates.adminLog = appendAdminLog(data, {
+    type: 'item-granted',
+    itemName: name || id,
+    category,
+    timestamp: Date.now()
+  });
 
   await setDoc(doc(db, 'users', uid), updates, { merge: true });
 }
