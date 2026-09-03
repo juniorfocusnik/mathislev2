@@ -1672,6 +1672,92 @@ const GRANTABLE_ITEMS = [
   ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette' }))
 ];
 
+// Every game a player has finished (see gameHistory) plus every purchase
+// (purchaseHistory) plus every admin give/remove/grant (adminLog) rolls up
+// into one stats object per player — computed once per dashboard load and
+// reused both for display and for the sort dropdown below.
+function computeUserStats(u) {
+  let normalEarned = 0;
+  let bonusEarned = 0;
+  let cheatLost = 0;
+  let timesCheated = 0;
+  let mostRecentGameTs = 0;
+
+  u.gameHistory.forEach((g) => {
+    if (g.normalEarned !== undefined || g.bonusEarned !== undefined) {
+      normalEarned += g.normalEarned || 0;
+      bonusEarned += g.bonusEarned || 0;
+    } else {
+      // Games logged before this earned/bonus split existed: count the
+      // whole reward as normal rather than guessing at a breakdown.
+      normalEarned += g.tokensEarned || 0;
+    }
+    if (g.cheated) {
+      timesCheated++;
+      cheatLost += g.tokensLost || 0;
+    }
+    if (g.timestamp > mostRecentGameTs) mostRecentGameTs = g.timestamp;
+  });
+
+  const itemsBought = u.purchaseHistory.length;
+  const purchaseLost = u.purchaseHistory.reduce((s, p) => s + (p.price || 0), 0);
+
+  let adminGiven = 0;
+  let adminRemoved = 0;
+  let itemsGrantedFree = 0;
+  u.adminLog.forEach((e) => {
+    if (e.type === 'tokens-given') adminGiven += e.amount || 0;
+    else if (e.type === 'tokens-removed') adminRemoved += e.amount || 0;
+    else if (e.type === 'item-granted') itemsGrantedFree++;
+  });
+
+  return {
+    normalEarned, bonusEarned, adminGiven,
+    totalEarned: normalEarned + bonusEarned + adminGiven,
+    cheatLost, purchaseLost, adminRemoved,
+    totalLost: cheatLost + purchaseLost + adminRemoved,
+    timesCheated, itemsBought, itemsGrantedFree, mostRecentGameTs
+  };
+}
+
+// Site-wide (across every player) admin-activity totals shown at the top of
+// the dashboard.
+function computeGlobalAdminStats(users) {
+  let totalChanges = 0;
+  let totalItemsFree = 0;
+  let netDiff = 0;
+  users.forEach((u) => {
+    u.adminLog.forEach((e) => {
+      totalChanges++;
+      if (e.type === 'tokens-given') netDiff += e.amount || 0;
+      else if (e.type === 'tokens-removed') netDiff -= e.amount || 0;
+      else if (e.type === 'item-granted') totalItemsFree++;
+    });
+  });
+  return { totalChanges, totalItemsFree, netDiff };
+}
+
+// The leaderboard's sort dropdown — each option just picks which number on
+// the (already-computed) user/stats object to sort highest-first by.
+const ADMIN_SORT_OPTIONS = [
+  { value: 'tokens', label: 'Most Tokens', fn: (u) => u.tokens },
+  { value: 'recentGame', label: 'Most Recent Game Played', fn: (u) => u.stats.mostRecentGameTs },
+  { value: 'itemsBought', label: 'Most Items Bought', fn: (u) => u.stats.itemsBought },
+  { value: 'tokensSpent', label: 'Most Tokens Spent on Items', fn: (u) => u.stats.purchaseLost },
+  { value: 'cheatTokens', label: 'Biggest Tab-Cheater (Tokens Lost)', fn: (u) => u.stats.cheatLost },
+  { value: 'cheatCount', label: 'Biggest Tab-Cheater (Times Cheated)', fn: (u) => u.stats.timesCheated },
+  { value: 'totalEarned', label: 'Most Tokens Earned', fn: (u) => u.stats.totalEarned },
+  { value: 'totalLost', label: 'Most Tokens Lost', fn: (u) => u.stats.totalLost },
+  { value: 'bonusInvestor', label: 'Biggest Bonus Investor', fn: (u) => u.stats.bonusEarned }
+];
+
+let adminSortMode = 'tokens';
+
+function sortUsers(users, mode) {
+  const opt = ADMIN_SORT_OPTIONS.find((o) => o.value === mode) || ADMIN_SORT_OPTIONS[0];
+  return [...users].sort((a, b) => opt.fn(b) - opt.fn(a));
+}
+
 // A themed popup box (not the browser's plain confirm()/prompt()) used for
 // anything on the admin dashboard that needs a deliberate extra step —
 // deleting an account or creating one. `bodyHtml` can include its own input
@@ -1755,6 +1841,7 @@ async function unlockAdminDashboard(openUid) {
   resultsEl.innerHTML = 'Loading...';
   try {
     const [users, frozen] = await Promise.all([getAllUserData(), getCompetitionFrozen()]);
+    users.forEach((u) => { u.stats = computeUserStats(u); });
     resultsEl.innerHTML = renderAdminDashboardHtml(users, frozen);
     wireAdminDashboard();
     if (openUid) {
@@ -1774,9 +1861,14 @@ function cssEscape(id) {
 }
 
 function renderAdminDashboardHtml(users, frozen) {
-  const grantOptionsHtml = GRANTABLE_ITEMS.map(i => `<option value="${i.category}|${i.id}">${i.name}</option>`).join('');
+  const grantOptionsHtml = GRANTABLE_ITEMS.map(i => `<option value="${i.category}|${i.id}|${i.name}">${i.name}</option>`).join('');
+  const sortOptionsHtml = ADMIN_SORT_OPTIONS.map(o =>
+    `<option value="${o.value}"${o.value === adminSortMode ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+  const globalStats = computeGlobalAdminStats(users);
+  const sortedUsers = sortUsers(users, adminSortMode);
 
-  const rows = users.map((u, i) => `
+  const rows = sortedUsers.map((u, i) => `
     <tr>
       <td>${i + 1}</td>
       <td>${u.username}</td>
@@ -1798,10 +1890,12 @@ function renderAdminDashboardHtml(users, frozen) {
         <button id="admin-freeze-btn" class="login-finish ${frozen ? 'admin-freeze-active' : ''}">
           ${frozen ? 'Competition Frozen — Click to Unfreeze' : 'Freeze Competition'}
         </button>
+        <select id="admin-sort-select">${sortOptionsHtml}</select>
       </div>
       <div class="home-secondary">${frozen
         ? 'Games, the token shop, and cheat penalties are all disabled right now — nobody\'s token count can change.'
         : 'Everything is live — playing games and shopping still changes token counts normally.'}</div>
+      <div class="home-secondary">Admin changes made: ${globalStats.totalChanges} | Items given free: ${globalStats.totalItemsFree} | Net tokens from admin changes: ${globalStats.netDiff >= 0 ? '+' : ''}${globalStats.netDiff}</div>
       <table class="admin-table admin-leaderboard">
         <tr><th>#</th><th>Name</th><th>Tokens</th><th></th></tr>
         ${rows}
@@ -1843,6 +1937,24 @@ function formatTimestamp(ts) {
   const hours = String(d.getHours()).padStart(2, '0');
   const minutes = String(d.getMinutes()).padStart(2, '0');
   return `${day} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${hours}:${minutes}`;
+}
+
+// Same as formatTimestamp but with seconds — used for the admin change log,
+// where two changes landing in the same minute need to stay distinguishable.
+function formatTimestampWithSeconds(ts) {
+  const d = new Date(ts);
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  return `${day} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${hours}:${minutes}:${seconds}`;
+}
+
+function describeAdminLogEntry(e) {
+  if (e.type === 'tokens-given') return `Gave ${e.amount} tokens`;
+  if (e.type === 'tokens-removed') return `Removed ${e.amount} tokens`;
+  if (e.type === 'item-granted') return `Granted "${e.itemName}" for free`;
+  return 'Unknown change';
 }
 
 function buildAdminDetailHtml(u, grantOptionsHtml) {
@@ -1894,12 +2006,30 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
     return `<tr><td>${b.name}</td><td>Active</td><td>${formatDuration(usedMs)}</td><td>${formatDuration(remainingMs)}</td></tr>`;
   }).join('');
 
+  const s = u.stats;
+  const adminLogRows = [...u.adminLog].sort((a, b) => b.timestamp - a.timestamp).map((e) => `
+    <tr><td>${describeAdminLogEntry(e)}</td><td>${formatTimestampWithSeconds(e.timestamp)}</td></tr>
+  `).join('');
+
   return `
     <div class="admin-detail-panel">
       <div class="admin-detail-col">
         <h4>Overview</h4>
         <div class="home-secondary">Games played: ${totalGames}</div>
         <div class="home-secondary">Correct: ${totalCorrect} | Wrong: ${totalWrong}</div>
+
+        <h4>Tokens Earned (${s.totalEarned})</h4>
+        <table class="admin-table">
+          <tr><th>Normal</th><th>Bonus</th><th>Admin Given</th></tr>
+          <tr><td>${s.normalEarned}</td><td>${s.bonusEarned}</td><td>${s.adminGiven}</td></tr>
+        </table>
+
+        <h4>Tokens Lost (${s.totalLost})</h4>
+        <table class="admin-table">
+          <tr><th>Cheating</th><th>Buying</th><th>Admin Removed</th></tr>
+          <tr><td>${s.cheatLost}</td><td>${s.purchaseLost}</td><td>${s.adminRemoved}</td></tr>
+        </table>
+        <div class="home-secondary">Times cheated: ${s.timesCheated} | Items bought: ${s.itemsBought}</div>
 
         <h4>By Difficulty</h4>
         <table class="admin-table">
@@ -1948,6 +2078,12 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
           <select class="admin-grant-select" id="admin-grant-select-${u.uid}">${grantOptionsHtml}</select>
           <button class="admin-grant-btn" data-uid="${u.uid}">Grant Free</button>
         </div>
+
+        <h4>Admin Change History (${u.adminLog.length}, most recent first)</h4>
+        <table class="admin-table">
+          <tr><th>Change</th><th>When</th></tr>
+          ${adminLogRows || '<tr><td colspan="2">No admin changes yet.</td></tr>'}
+        </table>
       </div>
     </div>
   `;
@@ -1984,8 +2120,8 @@ function wireAdminDashboard() {
   document.querySelectorAll('.admin-grant-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const uid = btn.dataset.uid;
-      const [category, id] = document.querySelector(`#admin-grant-select-${cssEscape(uid)}`).value.split('|');
-      await adminGrantItem(uid, category, id);
+      const [category, id, name] = document.querySelector(`#admin-grant-select-${cssEscape(uid)}`).value.split('|');
+      await adminGrantItem(uid, category, id, name);
       unlockAdminDashboard(uid);
     });
   });
@@ -2005,6 +2141,14 @@ function wireAdminDashboard() {
       const nowFrozen = !freezeBtn.classList.contains('admin-freeze-active');
       freezeBtn.disabled = true;
       await setCompetitionFrozen(nowFrozen);
+      unlockAdminDashboard();
+    });
+  }
+
+  const sortSelect = document.querySelector('#admin-sort-select');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      adminSortMode = sortSelect.value;
       unlockAdminDashboard();
     });
   }
