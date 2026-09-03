@@ -130,6 +130,13 @@ function runGame(config) {
   let questionsDone = 0;
   let correctCount = 0;
   let runTokensEarned = 0;
+  // Split of runTokensEarned for the admin dashboard: "normal" is what a
+  // correct answer would earn with no boosts at all; "bonus" is everything
+  // on top of that — the extra multiplier tokens, comeback/streak/lucky
+  // bonuses, and (since the question wouldn't exist without it) the *entire*
+  // reward for any answer given during bonus extra-time, past the base 60s.
+  let runNormalEarned = 0;
+  let runBonusEarned = 0;
   let currentQuestion = null;
   let finished = false;
   let locked = false; // true while a feedback flash is showing, to block double submits
@@ -229,6 +236,8 @@ function runGame(config) {
       correct: correctCount,
       wrong: questionsDone - correctCount,
       tokensEarned: runTokensEarned,
+      normalEarned: runNormalEarned,
+      bonusEarned: runBonusEarned,
       cheated: true,
       tokensLost: deducted,
       timestamp: Date.now()
@@ -298,6 +307,15 @@ function runGame(config) {
 
       runTokensEarned += reward;
       awardTokens(reward);
+
+      const wasBonusTime = (Date.now() - startTime) > BASE_GAME_DURATION_MS;
+      if (wasBonusTime) {
+        runBonusEarned += reward;
+      } else {
+        runNormalEarned += config.tokensPerCorrect;
+        runBonusEarned += reward - config.tokensPerCorrect;
+      }
+
       const bonusText = bonusParts.length ? ` (${bonusParts.join(', ')}!)` : '';
       feedbackEl.textContent = `Correct! +${reward} tokens${bonusText}`;
       feedbackEl.className = 'game-feedback game-feedback-correct';
@@ -349,6 +367,8 @@ function runGame(config) {
       correct: correctCount,
       wrong: questionsDone - correctCount,
       tokensEarned: runTokensEarned,
+      normalEarned: runNormalEarned,
+      bonusEarned: runBonusEarned,
       cheated: false,
       timestamp: Date.now()
     });
