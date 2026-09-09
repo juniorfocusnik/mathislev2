@@ -1857,9 +1857,28 @@ function openCreateAccountModal() {
   });
 }
 
-// New palettes get a generated colour-swatch icon immediately (see
-// token-shop.js's paletteSwatchDataUri) — no artwork needed to work. Ask
-// Claude for a real custom icon for a specific palette whenever you want one.
+// Reads the picture the admin chose (if any) as a data: URI stored directly
+// in the catalog entry — there's no Firebase Storage set up on this static
+// site, so this is the simplest way to make an uploaded image "just work"
+// with no extra service to enable. Kept small on purpose: Firestore caps a
+// whole document at 1MB, and the catalog doc holds every custom item.
+function readImageFileAsDataUri(fileInput) {
+  return new Promise((resolve, reject) => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) { resolve(null); return; }
+    if (file.size > 150 * 1024) {
+      reject(new Error("That image is too big — please use one under 150KB (a small PNG/SVG works best)."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Couldn't read that image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+// If the admin doesn't upload a picture, token-shop.js generates a plain
+// colour-swatch/badge icon instead — so this is optional, not required.
 function openAddPaletteModal() {
   openMathisleModal({
     title: 'Add New Palette',
@@ -1889,27 +1908,32 @@ function openAddPaletteModal() {
         <label>Background: <input type="color" id="new-palette-primary" value="#eaf8ff"></label>
         <label>Accent: <input type="color" id="new-palette-accent" value="#0090c8"></label>
       </div>
+      <div class="admin-action-row">
+        <label>Icon picture (optional): <input type="file" accept="image/*" id="new-palette-icon"></label>
+      </div>
     `,
     onConfirm: async (overlay) => {
       const name = overlay.querySelector('#new-palette-name').value.trim();
       const price = Number(overlay.querySelector('#new-palette-price').value);
       if (!name) throw new Error('Please enter a palette name.');
       if (!price || price <= 0) throw new Error('Please enter a price.');
+      const icon = await readImageFileAsDataUri(overlay.querySelector('#new-palette-icon'));
       await adminAddPalette({
         name,
         price,
         tier: overlay.querySelector('#new-palette-tier').value,
         mode: overlay.querySelector('#new-palette-mode').value,
         primaryColor: overlay.querySelector('#new-palette-primary').value,
-        accentColor: overlay.querySelector('#new-palette-accent').value
+        accentColor: overlay.querySelector('#new-palette-accent').value,
+        icon
       });
       unlockAdminDashboard();
     }
   });
 }
 
-// New multiplier tiers get a generated "x5"-style badge icon automatically —
-// no artwork needed since it's just a number.
+// If the admin doesn't upload a picture, a generated "x5"-style badge icon
+// is used instead — so this is optional, not required.
 function openAddMultiplierModal() {
   openMathisleModal({
     title: 'Add New Multiplier',
@@ -1918,6 +1942,9 @@ function openAddMultiplierModal() {
       <input class="login-inputbox" type="text" id="new-mult-name" placeholder="Name (e.g. x5 Tokens Forever)...">
       <input class="login-inputbox" type="number" id="new-mult-value" placeholder="Multiplier (e.g. 5)..." min="2">
       <input class="login-inputbox" type="number" id="new-mult-price" placeholder="Price (tokens)..." min="0">
+      <div class="admin-action-row">
+        <label>Icon picture (optional): <input type="file" accept="image/*" id="new-mult-icon"></label>
+      </div>
     `,
     onConfirm: async (overlay) => {
       const name = overlay.querySelector('#new-mult-name').value.trim();
@@ -1926,7 +1953,8 @@ function openAddMultiplierModal() {
       if (!name) throw new Error('Please enter a name.');
       if (!multiplier || multiplier < 2) throw new Error('Multiplier must be 2 or more.');
       if (!price || price <= 0) throw new Error('Please enter a price.');
-      await adminAddMultiplier({ name, multiplier, price });
+      const icon = await readImageFileAsDataUri(overlay.querySelector('#new-mult-icon'));
+      await adminAddMultiplier({ name, multiplier, price, icon });
       unlockAdminDashboard();
     }
   });
