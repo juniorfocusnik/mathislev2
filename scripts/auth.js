@@ -72,6 +72,16 @@ const nativeSetItem = Storage.prototype.setItem;
 let currentUid = null;
 let pushTimer = null;
 
+// Limited-edition palettes each get their own 'expiry_palette_<id>' key,
+// one per admin-added palette — an open-ended set that can't be listed
+// upfront like the fixed SYNCED_KEYS above, so it's matched by prefix instead.
+function isPaletteExpiryKey(key) {
+  return key.startsWith('expiry_palette_');
+}
+function isSyncedKey(key) {
+  return SYNCED_KEYS.includes(key) || isPaletteExpiryKey(key);
+}
+
 // Push a debounced snapshot of the synced keys to Firestore. Debounced so a
 // purchase that touches several keys in a row (e.g. spend + own a palette)
 // results in one write, not several.
@@ -86,6 +96,10 @@ function pushToCloud(uid) {
   for (const key of SYNCED_KEYS) {
     const value = localStorage.getItem(key);
     if (value !== null) data[key] = value;
+  }
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && isPaletteExpiryKey(key)) data[key] = localStorage.getItem(key);
   }
   return setDoc(doc(db, 'users', uid), data, { merge: true }).catch((err) => {
     console.error('Failed to sync progress to Firebase:', err);
@@ -103,11 +117,27 @@ async function pullFromCloud(uid) {
         localStorage.removeItem(key);
       }
     }
+    // Restore whichever limited-palette expiry keys the cloud doc has, and
+    // drop any stale local ones it doesn't (mirrors the SYNCED_KEYS loop above).
+    const cloudExpiryKeys = new Set(Object.keys(data).filter(isPaletteExpiryKey));
+    for (const key of cloudExpiryKeys) {
+      nativeSetItem.call(localStorage, key, data[key]);
+    }
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && isPaletteExpiryKey(key) && !cloudExpiryKeys.has(key)) {
+        localStorage.removeItem(key);
+      }
+    }
   }
 }
 
 function clearLocalCache() {
   for (const key of SYNCED_KEYS) localStorage.removeItem(key);
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key && isPaletteExpiryKey(key)) localStorage.removeItem(key);
+  }
   sessionStorage.removeItem('tokens');
 }
 
@@ -116,7 +146,7 @@ function clearLocalCache() {
 // exists) schedules a background push once someone is signed in.
 Storage.prototype.setItem = function (key, value) {
   nativeSetItem.call(this, key, value);
-  if (this === window.localStorage && currentUid && SYNCED_KEYS.includes(key)) {
+  if (this === window.localStorage && currentUid && isSyncedKey(key)) {
     schedulePush();
   }
 };
@@ -351,35 +381,44 @@ async function getCatalog() {
 // are hex strings the player picks — token-shop.js applies them as CSS
 // variables (no per-palette CSS file changes needed). `mode` is 'light' or
 // 'dark' (controls text-colour handling and the shop's mode badge).
-async function adminAddPalette({ name, price, tier, mode, primaryColor, accentColor }) {
+// `icon`, if given, is a data: URI (the admin's uploaded picture, read
+// client-side and stored inline — there's no Firebase Storage set up here,
+// so embedding it directly in the document is the simplest way to make an
+// uploaded image "just work"). Left out, token-shop.js generates a plain
+// colour-swatch icon from primaryColor/accentColor instead.
+async function adminAddPalette({ name, price, tier, mode, primaryColor, accentColor, icon }) {
   const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
   const data = snap.exists() ? snap.data() : {};
   let customPalettes = [];
   try { customPalettes = JSON.parse(data.customPalettes) || []; } catch {}
   const id = 'custom-' + slugify(name) + '-' + Math.random().toString(36).slice(2, 7);
-  customPalettes.push({
+  const entry = {
     id, name, price: Math.max(0, Number(price) || 0),
     tier, mode: mode === 'dark' ? 'dark' : 'light',
     primaryColor, accentColor,
     createdAt: Date.now()
-  });
+  };
+  if (icon) entry.icon = icon;
+  customPalettes.push(entry);
   await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { customPalettes: JSON.stringify(customPalettes) }, { merge: true });
   return id;
 }
 
 // Admin-only: adds a brand-new permanent token multiplier tier (e.g. x5, x10)
-// to the shop catalog, on top of the built-in x2/x3.
-async function adminAddMultiplier({ name, multiplier, price }) {
+// to the shop catalog, on top of the built-in x2/x3. `icon` — see adminAddPalette.
+async function adminAddMultiplier({ name, multiplier, price, icon }) {
   const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
   const data = snap.exists() ? snap.data() : {};
   let customMultipliers = [];
   try { customMultipliers = JSON.parse(data.customMultipliers) || []; } catch {}
   const safeMultiplier = Math.max(2, Number(multiplier) || 2);
   const id = 'custom-x' + safeMultiplier + '-' + Math.random().toString(36).slice(2, 7);
-  customMultipliers.push({
+  const entry = {
     id, name, multiplier: safeMultiplier, price: Math.max(0, Number(price) || 0),
     createdAt: Date.now()
-  });
+  };
+  if (icon) entry.icon = icon;
+  customMultipliers.push(entry);
   await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { customMultipliers: JSON.stringify(customMultipliers) }, { merge: true });
   return id;
 }
