@@ -1,5 +1,42 @@
 /* Color palettes bought from the token shop. Applied as a class on <body>. */
 
+/* Admin-added palettes (see token-shop.js's customPaletteToItem/applyPalette)
+   don't get their own hand-written block like the ones below — there's no
+   way for the admin to write CSS from a form. Instead they all share this
+   one generic block, and the actual two colours the admin picked are set as
+   CSS variables on <body> in JS. theme-custom-dark additionally flips text
+   to a light colour for palettes marked "dark mode". */
+body.theme-custom nav {
+  background-color: var(--palette-bg, beige);
+}
+body.theme-custom nav a {
+  color: var(--palette-accent, blue);
+}
+body.theme-custom .home,
+body.theme-custom .shop-item {
+  border-left: 6px solid var(--palette-accent, #c1c1c1);
+  background-color: var(--palette-bg, rgb(248, 248, 248));
+}
+body.theme-custom .home-secondary a,
+body.theme-custom .big-dif a,
+body.theme-custom .shop-category-title {
+  color: var(--palette-accent, blue);
+}
+body.theme-custom {
+  background-image: linear-gradient(var(--palette-overlay, rgba(0, 0, 0, 0.38)), var(--palette-overlay, rgba(0, 0, 0, 0.38))), url("../images/background-image.jpg");
+}
+
+body.theme-custom-dark nav {
+  text-shadow: none;
+}
+body.theme-custom-dark nav .token-count {
+  color: #e6e6ff;
+}
+body.theme-custom-dark .home,
+body.theme-custom-dark .shop-item {
+  color: #e6e6ff;
+}
+
 body.theme-default nav {
   background-color: beige;
 }
