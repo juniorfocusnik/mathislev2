@@ -76,7 +76,11 @@ function pickThemeCategories(n) {
 }
 
 // Topic 7 helper: a fraction already in simplest form, restricted to "nice" denominators.
-const NICE_DENOMINATORS = [2, 4, 5, 8, 10, 20, 25, 40, 50, 75, 100, 200, 500, 1000];
+// Every denominator here is 2/5-smooth (only prime factors 2 and 5), so num/den
+// always terminates in a handful of decimal places. 75 = 3x5^2 was removed —
+// its decimal (e.g. 1/75 = 0.01333...) never terminates, so rounding it to
+// answer.decimal desynced from the exact num/den fraction used elsewhere.
+const NICE_DENOMINATORS = [2, 4, 5, 8, 10, 20, 25, 40, 50, 100, 125, 200, 500, 1000];
 
 function randSimplifiedFraction() {
   let den, num;
@@ -467,9 +471,14 @@ const t3_angleCalc = [
   },
   // ---- Kite ----
   () => {
-    const a = randInt(20, 140);
-    const b = randInt(20, 90);
-    const c = 360 - a - 2 * b;
+    // Resample until C comes out as a normal (non-reflex) angle — otherwise
+    // this "kite" is secretly the concave dart shape handled separately below.
+    let a, b, c;
+    do {
+      a = randInt(20, 140);
+      b = randInt(20, 90);
+      c = 360 - a - 2 * b;
+    } while (c <= 0 || c >= 180);
     return {
       text: `A kite has the angle A, which is ${a} degrees and lies at the very top of the kite. The angle opposite to A (C) is ${c} degrees, down below. What is the size of angle B or D? _____ degrees`,
       answer: `${b}`
@@ -1845,8 +1854,12 @@ const h4_angleFacts = [
   },
   () => {
     const n = randInt(5, 12);
+    // "Write it using n" left the format wide open (180(n-2)? (n-2)*180?
+    // n-2 x 180?) even though only one exact string was ever accepted.
+    // Show the expected layout directly, matching how every other
+    // format-sensitive question in this file demonstrates its own format.
     return {
-      text: `What is the formula for the sum of interior angles of a polygon with n sides? Write it using n.`,
+      text: `What is the formula for the sum of interior angles of a polygon with n sides? Write it in the form (n-2)x180.`,
       answer: `(n-2)x180`
     };
   }
@@ -1947,7 +1960,7 @@ const h6_charts = [
     const angle = randChoice([18,36,45,54,60,72,90,108,120,135,144,150,180]);
     const percent = Math.round(angle * 100 / 360 * 100) / 100;
     return {
-      text: `A slice of a pie chart has an angle of ${angle} degrees. What percentage does it represent?`,
+      text: `A slice of a pie chart has an angle of ${angle} degrees. What percentage does it represent (to 2 decimal places if needed)?`,
       answer: `${percent}%`
     };
   },
@@ -1991,9 +2004,15 @@ const h7_convert = [
   },
   // percentage increase
   () => {
-    const original = randChoice([20,50,100,200,400,500,1000]);
-    const pct = randChoice([5,10,15,20,25,30,50,75]);
-    const increase = Math.round(original * pct / 100);
+    // e.g. original=50, pct=15 gives a 7.5 increase — Math.round used to
+    // silently round that to 8, making the stored answer mathematically
+    // wrong. Resample until the increase is an exact whole number instead.
+    let original, pct, increase;
+    do {
+      original = randChoice([20,50,100,200,400,500,1000]);
+      pct = randChoice([5,10,15,20,25,30,50,75]);
+      increase = original * pct / 100;
+    } while (!Number.isInteger(increase));
     return {
       text: `Increase ${original} by ${pct}%.`,
       answer: `${original + increase}`
@@ -2001,9 +2020,12 @@ const h7_convert = [
   },
   // percentage decrease
   () => {
-    const original = randChoice([20,50,100,200,400,500,1000]);
-    const pct = randChoice([5,10,15,20,25,30,50,75]);
-    const decrease = Math.round(original * pct / 100);
+    let original, pct, decrease;
+    do {
+      original = randChoice([20,50,100,200,400,500,1000]);
+      pct = randChoice([5,10,15,20,25,30,50,75]);
+      decrease = original * pct / 100;
+    } while (!Number.isInteger(decrease));
     return {
       text: `Decrease ${original} by ${pct}%.`,
       answer: `${original - decrease}`
@@ -2011,9 +2033,15 @@ const h7_convert = [
   },
   // reverse percentage: find original before increase
   () => {
-    const pct = randChoice([10,20,25,50]);
-    const original = randChoice([20,40,50,80,100,200]);
-    const after = Math.round(original * (100 + pct) / 100);
+    // original=50, pct=25 gives an exact "after" of 62.5 — Math.round used to
+    // silently round that to 63, so the true original for 63 (50.4) no longer
+    // matched the stored answer (50). Resample until "after" lands exactly.
+    let pct, original, after;
+    do {
+      pct = randChoice([10,20,25,50]);
+      original = randChoice([20,40,50,80,100,200]);
+      after = original * (100 + pct) / 100;
+    } while (!Number.isInteger(after));
     return {
       text: `After a ${pct}% increase, a value is ${after}. What was the original value?`,
       answer: `${original}`
@@ -2021,9 +2049,12 @@ const h7_convert = [
   },
   // reverse percentage: find original before decrease
   () => {
-    const pct = randChoice([10,20,25,50]);
-    const original = randChoice([20,40,50,80,100,200]);
-    const after = Math.round(original * (100 - pct) / 100);
+    let pct, original, after;
+    do {
+      pct = randChoice([10,20,25,50]);
+      original = randChoice([20,40,50,80,100,200]);
+      after = original * (100 - pct) / 100;
+    } while (!Number.isInteger(after));
     return {
       text: `After a ${pct}% decrease, a value is ${after}. What was the original value?`,
       answer: `${original}`
@@ -2266,9 +2297,16 @@ const h11_multiplyDecimals = [
 const h12_percentage = [
   // percentage change: find what % one number is of another
   () => {
-    const total = randChoice([50,100,200,400,500,1000]);
-    const pct = randChoice([5,10,15,20,25,30,40,50,60,75,80]);
-    const part = Math.round(total * pct / 100);
+    // total=50 paired with an odd pct (e.g. 5, 15, 25, 75) gives a fractional
+    // part (2.5, 7.5, ...) that Math.round used to silently round away,
+    // making the stored pct% no longer the true percentage of the rounded
+    // part. Resample until the part is an exact whole number.
+    let total, pct, part;
+    do {
+      total = randChoice([50,100,200,400,500,1000]);
+      pct = randChoice([5,10,15,20,25,30,40,50,60,75,80]);
+      part = total * pct / 100;
+    } while (!Number.isInteger(part));
     return {
       text: `What percentage is ${part} of ${total}?`,
       answer: `${pct}%`
@@ -2276,9 +2314,13 @@ const h12_percentage = [
   },
   // find the percentage increase between two values
   () => {
-    const original = randChoice([50,100,200,400,500]);
-    const pct = randChoice([10,20,25,50]);
-    const newVal = original + Math.round(original * pct / 100);
+    let original, pct, change;
+    do {
+      original = randChoice([50,100,200,400,500]);
+      pct = randChoice([10,20,25,50]);
+      change = original * pct / 100;
+    } while (!Number.isInteger(change));
+    const newVal = original + change;
     return {
       text: `A value increased from ${original} to ${newVal}. What is the percentage increase?`,
       answer: `${pct}%`
@@ -2286,9 +2328,13 @@ const h12_percentage = [
   },
   // find the percentage decrease between two values
   () => {
-    const original = randChoice([50,100,200,400,500]);
-    const pct = randChoice([10,20,25,50]);
-    const newVal = original - Math.round(original * pct / 100);
+    let original, pct, change;
+    do {
+      original = randChoice([50,100,200,400,500]);
+      pct = randChoice([10,20,25,50]);
+      change = original * pct / 100;
+    } while (!Number.isInteger(change));
+    const newVal = original - change;
     return {
       text: `A value decreased from ${original} to ${newVal}. What is the percentage decrease?`,
       answer: `${pct}%`
@@ -2455,17 +2501,30 @@ const h17_recurring = [
   () => {
     const validFracs = [{n:1,d:3},{n:2,d:3},{n:1,d:6},{n:5,d:6},{n:1,d:7},{n:1,d:9},{n:2,d:9},{n:4,d:9}];
     const {n, d} = randChoice(validFracs);
-    // compute recurring decimal by long division (up to 6 digits)
-    let digits = "", remainder = n;
-    for (let i = 0; i < 6; i++) {
+    // Long division, tracking remainders to find the true repeating cycle
+    // (rather than always cutting off at a fixed 6 digits — that used to
+    // print e.g. "0.333333..." for 1/3, which a player typing the shorter
+    // "0.333..." convention used elsewhere in this file wouldn't match).
+    // Short cycles (<=2 digits) are repeated 3x so the pattern reads clearly,
+    // matching the "0.ddd..." single/double-digit convention; longer cycles
+    // (like 1/7's 6-digit repeat) are shown once, as originally intended.
+    const seen = new Map();
+    const digitsArr = [];
+    let remainder = n;
+    while (!seen.has(remainder)) {
+      seen.set(remainder, digitsArr.length);
       remainder *= 10;
-      digits += Math.floor(remainder / d);
+      digitsArr.push(Math.floor(remainder / d));
       remainder = remainder % d;
-      if (remainder === 0) break;
     }
+    const cycleStart = seen.get(remainder);
+    const leadIn = digitsArr.slice(0, cycleStart).join("");
+    const cycle = digitsArr.slice(cycleStart).join("");
+    const repeatCount = cycle.length <= 2 ? 3 : 1;
+    const shown = leadIn + cycle.repeat(repeatCount);
     return {
       text: `Write ${n}/${d} as a recurring decimal. Use the format 0.ddd...`,
-      answer: `0.${digits}...`
+      answer: `0.${shown}...`
     };
   }
 ];
@@ -2705,11 +2764,18 @@ const m_convert = [
   },
   // complex percentage change: chain two changes
   () => {
-    const pct1 = randChoice([10, 20, 25, 50]);
-    const pct2 = randChoice([10, 20, 25, 50]);
-    const original = randChoice([100, 200, 400, 1000]);
-    const after1 = original * (100 + pct1) / 100;
-    const after2 = Math.round(after1 * (100 - pct2) / 100);
+    // e.g. original=100, pct1=10 -> after1=110, then pct2=25 needs 110*0.75
+    // = 82.5 — Math.round used to silently round that to 83, which no longer
+    // matches the exact chained value a careful player would compute.
+    // Resample until both chained steps land on whole numbers.
+    let pct1, pct2, original, after1, after2;
+    do {
+      pct1 = randChoice([10, 20, 25, 50]);
+      pct2 = randChoice([10, 20, 25, 50]);
+      original = randChoice([100, 200, 400, 1000]);
+      after1 = original * (100 + pct1) / 100;
+      after2 = after1 * (100 - pct2) / 100;
+    } while (!Number.isInteger(after1) || !Number.isInteger(after2));
     return {
       text: `A value of ${original} is increased by ${pct1}%, then decreased by ${pct2}%. What is the final value?`,
       answer: `${after2}`
@@ -2717,14 +2783,19 @@ const m_convert = [
   },
   // compound interest
   () => {
+    // Rounding to the nearest penny each year can land on a value like
+    // 1102.5 — one nonzero decimal digit — which JS stringifies without the
+    // trailing zero. A player following normal money formatting would type
+    // "1102.50" and be marked wrong. Force the answer (and the question's
+    // instruction) to always use exactly 2 decimal places.
     const principal = randChoice([100, 200, 500, 1000]);
     const rate = randChoice([5, 10, 20, 25]);
     const years = randInt(2, 3);
     let amount = principal;
     for (let i = 0; i < years; i++) amount = Math.round(amount * (1 + rate/100) * 100) / 100;
     return {
-      text: `£${principal} is invested at ${rate}% compound interest per year for ${years} years. What is the total amount?`,
-      answer: `£${amount}`
+      text: `£${principal} is invested at ${rate}% compound interest per year for ${years} years. What is the total amount? Give your answer to 2 decimal places (e.g. 123.40).`,
+      answer: `£${amount.toFixed(2)}`
     };
   },
   // standard form: write in standard form
@@ -2836,7 +2907,11 @@ const m_findX = [
     const c = r1 * r2;
     const bStr = b === 0 ? "" : (b > 0 ? `+${b}x` : `${b}x`);
     const cStr = c === 0 ? "" : (c > 0 ? `+${c}` : `${c}`);
-    const roots = [...new Set([r1, r2])].sort((a,b)=>a-b);
+    // Don't dedupe: when r1 === r2 (a repeated root), the question still
+    // asks for "both solutions separated by a comma" — deduping used to
+    // leave a single bare number with no comma, contradicting that
+    // instruction and mismatching what a player following it would type.
+    const roots = [r1, r2].sort((a,b)=>a-b);
     return {
       text: `Solve x^2${bStr}${cStr}=0. Give both solutions separated by a comma.`,
       answer: roots.join(", ")
@@ -2929,10 +3004,18 @@ const m_powersRoots = [
     const a = randChoice([2,3,5,6,7,10]);
     const b = randChoice([2,3,5,6,7,10]);
     const product = a * b;
-    const outerSq = Math.floor(Math.sqrt(product));
-    const inner = product / (outerSq * outerSq);
-    const outer = outerSq;
-    const answer = outer === 1 ? `√${product}` : (inner === 1 ? `${outer}` : `${outer}√${inner}`);
+    // floor(sqrt(product)) is NOT generally the largest square factor of
+    // product (e.g. product=18: floor(sqrt(18))=4, but 4^2 doesn't divide
+    // 18 at all — the real answer is 3√2). That used to produce nonsense
+    // like "4√1.125". Properly pull out the largest perfect-square factor.
+    let outer = 1, inner = product;
+    for (let i = 2; i * i <= product; i++) {
+      while (inner % (i * i) === 0) {
+        inner /= (i * i);
+        outer *= i;
+      }
+    }
+    const answer = outer === 1 ? `√${inner}` : (inner === 1 ? `${outer}` : `${outer}√${inner}`);
     return {
       text: `Simplify √${a} x √${b}. Write in simplest form.`,
       answer: answer
@@ -3097,7 +3180,10 @@ const m_simplifying = [
       numAns = n1 + den - n2;
     }
     const [sn,sd] = numAns === 0 ? [0,1] : simplifyFraction(numAns, den);
-    const answer = sn === 0 ? `${wholeAns}` : `${wholeAns} ${sn}/${sd}`;
+    // When borrowing brings the whole part down to 0 (e.g. 5 1/4 - 4 3/4 =
+    // 1/2), a mixed number with a "0 " whole part isn't how anyone writes
+    // that — a player types the bare fraction "1/2", not "0 1/2".
+    const answer = sn === 0 ? `${wholeAns}` : (wholeAns === 0 ? `${sn}/${sd}` : `${wholeAns} ${sn}/${sd}`);
     return {
       text: `Calculate ${w1} ${n1}/${den} - ${w2} ${n2}/${den}. Simplify your answer.`,
       answer: answer
@@ -3263,11 +3349,13 @@ const y_nthTerm = [
 const y_circleFacts = [
   // circumference given radius
   () => {
+    // "round to 2dp" (no "if needed") means the answer must always SHOW 2
+    // decimal places — plain division/rounding drops a trailing zero (e.g.
+    // 62.8 instead of 62.80), so force it with toFixed.
     const r = randInt(2, 15);
-    const c = Math.round(2 * Math.PI * r * 100) / 100;
     return {
       text: `Find the circumference of a circle with radius ${r}cm. Use π=3.14 and round to 2dp.`,
-      answer: `${Math.round(2 * 3.14 * r * 100) / 100}cm`
+      answer: `${(2 * 3.14 * r).toFixed(2)}cm`
     };
   },
   // area given radius
@@ -3275,7 +3363,7 @@ const y_circleFacts = [
     const r = randInt(2, 12);
     return {
       text: `Find the area of a circle with radius ${r}cm. Use π=3.14 and round to 2dp.`,
-      answer: `${Math.round(3.14 * r * r * 100) / 100}cm²`
+      answer: `${(3.14 * r * r).toFixed(2)}cm²`
     };
   },
   // radius from diameter
@@ -3288,10 +3376,14 @@ const y_circleFacts = [
   },
   // diameter from circumference
   () => {
+    // The "to 2dp" here was ambiguous — it read as if the (always whole-
+    // number) diameter answer needed 2dp too. Reworded so the 2dp applies
+    // only to how the given circumference was rounded, matching what's
+    // actually displayed in the question.
     const d = randInt(4, 20);
     const c = Math.round(d * 3.14 * 100) / 100;
     return {
-      text: `A circle has a circumference of ${c}cm. Using π=3.14, find the diameter to 2dp.`,
+      text: `A circle has a circumference of ${c}cm (rounded to 2dp), using π=3.14. Find the diameter.`,
       answer: `${d}cm`
     };
   }
@@ -3677,9 +3769,13 @@ const y_quadratic = [
     const r2 = Math.round((-b - Math.sqrt(disc))/2 * 100)/100;
     const cStr = c<0?`${c}`:`+${c}`;
     const bStr = b<0?`${b}x`:`+${b}x`;
+    // The question demands "2dp" without a "if needed" escape hatch, but a
+    // clean root (e.g. 1 or -4 for b=3,c=-4) or one that rounds to a
+    // trailing-zero hundredths digit (e.g. 0.7) used to stringify without
+    // the trailing zero(s) a player told "2dp" would actually write.
     return {
       text: `Use the quadratic formula to solve x^2${bStr}${cStr}=0. Give your answers to 2dp.`,
-      answer: `${Math.max(r1,r2)}, ${Math.min(r1,r2)}`
+      answer: `${Math.max(r1,r2).toFixed(2)}, ${Math.min(r1,r2).toFixed(2)}`
     };
   }
 ];
@@ -3758,14 +3854,14 @@ const y_logics = [
 
 // ---- Yellow 12: sin, cos and tan ----
 const TRIG_TABLE = [
-  {deg:30,fn:"sin",val:"0.5"},
+  {deg:30,fn:"sin",val:"0.500"},
   {deg:30,fn:"cos",val:"0.866"},
   {deg:30,fn:"tan",val:"0.577"},
   {deg:45,fn:"sin",val:"0.707"},
   {deg:45,fn:"cos",val:"0.707"},
-  {deg:45,fn:"tan",val:"1"},
+  {deg:45,fn:"tan",val:"1.000"},
   {deg:60,fn:"sin",val:"0.866"},
-  {deg:60,fn:"cos",val:"0.5"},
+  {deg:60,fn:"cos",val:"0.500"},
   {deg:60,fn:"tan",val:"1.732"},
 ];
 
@@ -3830,7 +3926,7 @@ const y_circleCalc = [
     const arc = Math.round(angle/360 * 2 * 3.14 * r * 100)/100;
     return {
       text: `Find the arc length of a sector with radius ${r}cm and angle ${angle}°. Use π=3.14 and round to 2dp.`,
-      answer: `${arc}cm`
+      answer: `${arc.toFixed(2)}cm`
     };
   },
   // area of sector: (θ/360) × πr²
@@ -3840,7 +3936,7 @@ const y_circleCalc = [
     const area = Math.round(angle/360 * 3.14 * r*r * 100)/100;
     return {
       text: `Find the area of a sector with radius ${r}cm and angle ${angle}°. Use π=3.14 and round to 2dp.`,
-      answer: `${area}cm²`
+      answer: `${area.toFixed(2)}cm²`
     };
   },
   // perimeter of sector: arc + 2r
@@ -3851,7 +3947,7 @@ const y_circleCalc = [
     const perim = Math.round((arc + 2*r)*100)/100;
     return {
       text: `Find the perimeter of a sector with radius ${r}cm and angle ${angle}°. Use π=3.14 and round to 2dp.`,
-      answer: `${perim}cm`
+      answer: `${perim.toFixed(2)}cm`
     };
   },
   // find angle from arc length and radius
@@ -3888,7 +3984,7 @@ const r_advCircleCalc = [
     const area = Math.round(3.14*(R*R - r*r)*100)/100;
     return {
       text: `An annulus has outer radius ${R}cm and inner radius ${r}cm. Find its area. Use π=3.14 and round to 2dp.`,
-      answer: `${area}cm²`
+      answer: `${area.toFixed(2)}cm²`
     };
   },
   // circle inscribed in square: shaded area outside circle
@@ -3898,7 +3994,7 @@ const r_advCircleCalc = [
     const shaded = Math.round((side*side - 3.14*r*r)*100)/100;
     return {
       text: `A circle of radius ${r}cm is inscribed in a square with side ${side}cm. Find the shaded area outside the circle. Use π=3.14 and round to 2dp.`,
-      answer: `${shaded}cm²`
+      answer: `${shaded.toFixed(2)}cm²`
     };
   },
   // find arc length given area of sector and radius
@@ -3921,7 +4017,7 @@ const r_advCircleCalc = [
     const segArea = Math.round((sectorArea - triArea)*100)/100;
     return {
       text: `A sector has radius ${r}cm and angle 90°. Find the area of the segment (sector minus triangle). Use π=3.14 and round to 2dp.`,
-      answer: `${segArea}cm²`
+      answer: `${segArea.toFixed(2)}cm²`
     };
   },
 ];
@@ -3957,9 +4053,14 @@ const r_advLogics = [
       {if:"x is even", then:"x² is even", contra:"x² is not even, then x is not even"}
     ];
     const {if:p, then:q, contra} = randChoice(stmts);
+    // The prompt already spells out "If <negated q>, then ..." and asks the
+    // player to finish it — so the expected answer is just the completion
+    // after "then", not the whole contra string (which used to redundantly
+    // repeat the "If ..." clause the question already showed).
+    const [contraIf, contraThen] = contra.split(", then ");
     return {
-      text: `"If ${p}, then ${q}." What is the contrapositive of this statement? Finish: "If ${contra.split(", then ")[0]}, then ..."`,
-      answer: contra
+      text: `"If ${p}, then ${q}." What is the contrapositive of this statement? Finish: "If ${contraIf}, then ..."`,
+      answer: contraThen
     };
   },
   // syllogism validity
