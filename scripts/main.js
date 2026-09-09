@@ -1690,7 +1690,7 @@ function buildGrantableItems(catalog) {
     ...PERMANENT_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'permanent-boost', extra: {} })),
     ...TIMED_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'timed-boost', extra: {} })),
     ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: {} })),
-    ...catalog.customMultipliers.map(m => ({ id: m.id, name: m.name, category: 'custom-multiplier', extra: { multiplier: m.multiplier } })),
+    ...catalog.customMultipliers.map(m => ({ id: m.id, name: m.name, category: 'custom-multiplier', extra: { multiplier: m.multiplier, duration: m.duration } })),
     ...catalog.customPalettes.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: { limited: p.tier === 'limited' } }))
   ];
 }
@@ -1939,9 +1939,17 @@ function openAddMultiplierModal() {
     title: 'Add New Multiplier',
     confirmLabel: 'Add Multiplier',
     bodyHtml: `
-      <input class="login-inputbox" type="text" id="new-mult-name" placeholder="Name (e.g. x5 Tokens Forever)...">
+      <input class="login-inputbox" type="text" id="new-mult-name" placeholder="Name (e.g. x5 Tokens)...">
       <input class="login-inputbox" type="number" id="new-mult-value" placeholder="Multiplier (e.g. 5)..." min="2">
       <input class="login-inputbox" type="number" id="new-mult-price" placeholder="Price (tokens)..." min="0">
+      <div class="admin-action-row">
+        <label>Duration:
+          <select id="new-mult-duration">
+            <option value="forever">Forever</option>
+            <option value="10h">10 Hours</option>
+          </select>
+        </label>
+      </div>
       <div class="admin-action-row">
         <label>Icon picture (optional): <input type="file" accept="image/*" id="new-mult-icon"></label>
       </div>
@@ -1950,11 +1958,12 @@ function openAddMultiplierModal() {
       const name = overlay.querySelector('#new-mult-name').value.trim();
       const multiplier = Number(overlay.querySelector('#new-mult-value').value);
       const price = Number(overlay.querySelector('#new-mult-price').value);
+      const duration = overlay.querySelector('#new-mult-duration').value;
       if (!name) throw new Error('Please enter a name.');
       if (!multiplier || multiplier < 2) throw new Error('Multiplier must be 2 or more.');
       if (!price || price <= 0) throw new Error('Please enter a price.');
       const icon = await readImageFileAsDataUri(overlay.querySelector('#new-mult-icon'));
-      await adminAddMultiplier({ name, multiplier, price, icon });
+      await adminAddMultiplier({ name, multiplier, price, duration, icon });
       unlockAdminDashboard();
     }
   });
@@ -2141,19 +2150,22 @@ function buildAdminDetailHtml(u, grantOptionsHtml, catalog) {
     ? Object.entries(purchaseCounts).map(([name, count]) => `<tr><td>${name}</td><td>${count}</td></tr>`).join('')
     : '<tr><td colspan="2">No purchases yet.</td></tr>';
 
+  const customForeverMultipliers = catalog.customMultipliers.filter((m) => m.duration !== '10h');
+  const customTimedMultipliers = catalog.customMultipliers.filter((m) => m.duration === '10h');
+
   const foreverRows = [
     ...PERMANENT_BOOSTS.map((b) => {
       const owned = isPermanentBoostOwned(u, b.id);
       return `<tr><td>${b.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
     }),
-    ...catalog.customMultipliers.map((m) => {
+    ...customForeverMultipliers.map((m) => {
       const owned = u.tokenMultiplier >= m.multiplier;
       return `<tr><td>${m.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
     })
   ].join('');
 
   const now = Date.now();
-  const timedRows = TIMED_BOOSTS.map((b) => {
+  const timedRows = [...TIMED_BOOSTS, ...customTimedMultipliers].map((b) => {
     const expiry = Number(u.raw['expiry_' + b.id]) || 0;
     const active = now < expiry;
     if (!active) return `<tr><td>${b.name}</td><td>Not active</td><td>—</td><td>—</td></tr>`;
