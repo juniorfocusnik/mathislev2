@@ -280,16 +280,30 @@ const TUTORING = [
 const LIMITED_PALETTE_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks
 
 let cachedCatalog = null;
+// Surfaced as a visible banner in the shop/equip pages (rather than just a
+// console.error) so a failed catalog load — e.g. a Firestore permissions
+// issue — doesn't just look like "admin-added items silently don't exist".
+let catalogLoadError = null;
+
 async function ensureCatalog() {
   if (!cachedCatalog) {
     try {
       cachedCatalog = await getCatalog();
+      catalogLoadError = null;
     } catch (err) {
       console.error('Failed to load the shop catalog:', err);
+      catalogLoadError = err.message;
       cachedCatalog = { customPalettes: [], customMultipliers: [] };
     }
   }
   return cachedCatalog;
+}
+
+function catalogWarningHtml() {
+  if (!catalogLoadError) return '';
+  return `<div class="home-secondary" style="color: rgb(150, 0, 0); font-weight: bold;">
+    Couldn't load admin-added palettes/multipliers (${catalogLoadError}). Built-in items below still work.
+  </div>`;
 }
 
 // A small generated placeholder icon so a brand-new admin-added item looks
@@ -321,7 +335,7 @@ function customMultiplierToItem(m) {
     name: m.name,
     desc: `Permanently multiplies every correct answer's tokens by ${m.multiplier}, forever.`,
     price: m.price,
-    icon: multiplierIconDataUri(m.multiplier),
+    icon: m.icon || multiplierIconDataUri(m.multiplier),
     isOwned: () => getMultiplierTier() >= m.multiplier,
     apply: () => setMultiplierTier(m.multiplier),
     isCustomMultiplier: true,
@@ -338,7 +352,7 @@ function customPaletteToItem(p) {
       ? 'A limited-edition palette — active for 2 weeks from the moment you get it, then it expires.'
       : 'A custom palette recolouring the whole site.',
     price: p.price,
-    icon: paletteSwatchDataUri(p.primaryColor, p.accentColor),
+    icon: p.icon || paletteSwatchDataUri(p.primaryColor, p.accentColor),
     mode: p.mode,
     primaryColor: p.primaryColor,
     accentColor: p.accentColor,
@@ -520,6 +534,7 @@ function renderShopWithCatalog(catalog) {
       <div class="home-title">Token Shop</div>
       <div class="home-secondary">You have ${tokens} tokens <img src="icons/token.png" class="token-count-img"> to spend.</div>
       <div class="home-secondary">Earn more by playing the games! Already own a palette? <a href="index.html?page=equip-palette">Equip it here</a>.</div>
+      ${catalogWarningHtml()}
     </div>
 
     <div class="shop-category-title">Boosts (Forever)</div>
@@ -735,6 +750,7 @@ function renderEquipPageWithCatalog(catalog) {
       <div class="home-title">Equip Palette</div>
       <div class="home-secondary">Choose which colour palette to use across the whole site.</div>
       <div class="home-secondary">Locked palettes can be bought in the <a href="index.html?page=tokenshop">Token Shop</a>.</div>
+      ${catalogWarningHtml()}
     </div>
 
     <div class="shop-category-title">Default</div>
