@@ -1,4 +1,5 @@
 import { getTokens, spendTokens, getAccountName, isCompetitionFrozen } from './main.js';
+import { getCatalog } from './auth.js';
 
 // ============================================================
 // TOKEN SHOP
@@ -12,29 +13,14 @@ import { getTokens, spendTokens, getAccountName, isCompetitionFrozen } from './m
 //               Equip Palette page (or the built-in "Default" palette).
 //               Grouped into three rarity tiers: Simple, Rare, Ultra Special.
 //   - tutoring: a real-life reward, buyable repeatedly (no owned state),
-//               sends a booking notification email via EmailJS
+//               sends a booking notification email via EmailJS — the ONLY
+//               purchase type that emails Denys; boosts/palettes are silent.
 // ============================================================
 
 const ICONS = 'images/tokenshop-powerups/';
 
-// EmailJS config. Every purchase notifies Denys: tutoring uses its own
-// dedicated template (booking details); everything else (boosts, palettes)
-// uses the same template the Save page uses, since there's no real backend —
-// email is how Denys finds out tokens were spent.
 const EMAIL_SERVICE = 'service_dkw6mg8og';
-const PURCHASE_EMAIL_TEMPLATE = 'template_unhloza';
 const TUTORING_EMAIL_TEMPLATE = 'template_0y4ctoo';
-
-// Fire-and-forget notification for a non-tutoring purchase (boost/palette).
-// Uses the same {{name}}/{{count}} shape as the Save page's email.
-function notifyPurchase() {
-  emailjs.send(EMAIL_SERVICE, PURCHASE_EMAIL_TEMPLATE, {
-    name: getAccountName() || 'Unknown Player',
-    count: String(getTokens())
-  }).catch((err) => {
-    console.error('Failed to send the purchase notification email:', err);
-  });
-}
 
 const LOCK_ICON = `<svg viewBox="0 0 24 24" class="palette-lock-icon"><path d="M12 1a5 5 0 0 0-5 5v3H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2V6a5 5 0 0 0-5-5zm-3 8V6a3 3 0 0 1 6 0v3H9zm3 4a2 2 0 0 1 1 3.73V19a1 1 0 0 1-2 0v-2.27A2 2 0 0 1 12 13z"/></svg>`;
 
@@ -287,6 +273,107 @@ const TUTORING = [
   }
 ];
 
+// ---- Admin-added catalog items (custom palettes / multiplier tiers) ----
+// Built-in items above are hardcoded lists; anything the admin adds lives in
+// Firestore instead (see auth.js's getCatalog/adminAddPalette/
+// adminAddMultiplier) so new items show up here with no code changes.
+const LIMITED_PALETTE_DURATION_MS = 14 * 24 * 60 * 60 * 1000; // 2 weeks
+
+let cachedCatalog = null;
+async function ensureCatalog() {
+  if (!cachedCatalog) {
+    try {
+      cachedCatalog = await getCatalog();
+    } catch (err) {
+      console.error('Failed to load the shop catalog:', err);
+      cachedCatalog = { customPalettes: [], customMultipliers: [] };
+    }
+  }
+  return cachedCatalog;
+}
+
+// A small generated placeholder icon so a brand-new admin-added item looks
+// reasonable immediately, without needing real artwork right away.
+function multiplierIconDataUri(n) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="#2e7d32" stroke="white" stroke-width="4"/><text x="50" y="63" font-size="34" font-family="Arial, sans-serif" font-weight="bold" fill="white" text-anchor="middle">x${n}</text></svg>`;
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+function paletteSwatchDataUri(primaryColor, accentColor) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="${primaryColor}"/><rect y="70" width="100" height="30" fill="${accentColor}"/></svg>`;
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+
+function hexToRgba(hex, alpha) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+  if (!m) return `rgba(0, 0, 0, ${alpha})`;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Adapts a catalog multiplier entry into the same shape as a PERMANENT_BOOSTS
+// item, so the rest of the shop code (rendering, buying, admin grant list)
+// can treat built-in and custom multipliers identically.
+function customMultiplierToItem(m) {
+  return {
+    id: m.id,
+    name: m.name,
+    desc: `Permanently multiplies every correct answer's tokens by ${m.multiplier}, forever.`,
+    price: m.price,
+    icon: multiplierIconDataUri(m.multiplier),
+    isOwned: () => getMultiplierTier() >= m.multiplier,
+    apply: () => setMultiplierTier(m.multiplier),
+    isCustomMultiplier: true,
+    multiplier: m.multiplier
+  };
+}
+
+// Adapts a catalog palette entry into the same shape as a built-in palette item.
+function customPaletteToItem(p) {
+  return {
+    id: p.id,
+    name: p.name,
+    desc: p.tier === 'limited'
+      ? 'A limited-edition palette — active for 2 weeks from the moment you get it, then it expires.'
+      : 'A custom palette recolouring the whole site.',
+    price: p.price,
+    icon: paletteSwatchDataUri(p.primaryColor, p.accentColor),
+    mode: p.mode,
+    primaryColor: p.primaryColor,
+    accentColor: p.accentColor,
+    tier: p.tier,
+    limited: p.tier === 'limited'
+  };
+}
+
+function getPaletteExpiry(id) {
+  return Number(localStorage.getItem('expiry_palette_' + id)) || 0;
+}
+function isLimitedPaletteExpired(id) {
+  const expiry = getPaletteExpiry(id);
+  return expiry > 0 && Date.now() >= expiry;
+}
+
+// Drops any limited-edition palette whose 2-week window has passed from
+// ownedPalettes, and falls back to the Default palette if the expired one
+// was the currently-equipped theme. Called whenever the shop/equip pages
+// load, once the catalog (which is what says which owned ids are "limited")
+// is available.
+function pruneExpiredLimitedPalettes(catalog) {
+  const limitedIds = new Set(catalog.customPalettes.filter(p => p.tier === 'limited').map(p => p.id));
+  if (limitedIds.size === 0) return;
+  const owned = getOwnedPalettes();
+  const stillOwned = owned.filter(id => !(limitedIds.has(id) && isLimitedPaletteExpired(id)));
+  if (stillOwned.length !== owned.length) {
+    localStorage.setItem('ownedPalettes', JSON.stringify(stillOwned));
+    const activeTheme = localStorage.getItem('activeTheme');
+    if (activeTheme && !stillOwned.includes(activeTheme) && limitedIds.has(activeTheme)) {
+      applyPalette('default');
+    }
+  }
+}
+
 function getOwnedPalettes() {
   try {
     return JSON.parse(localStorage.getItem('ownedPalettes')) || [];
@@ -309,22 +396,74 @@ function recordPurchase(item, category) {
   localStorage.setItem('purchaseHistory', JSON.stringify(history));
 }
 
+const BUILTIN_PALETTE_IDS = new Set([
+  DEFAULT_PALETTE, DEFAULT_DARK_PALETTE, ...ALL_PALETTES
+].map(p => p.id));
+
+// Built-in palettes work exactly as before (a `theme-<id>` class with its
+// own hand-written block in theme.css). A custom (admin-added) palette has
+// no such block — instead it gets a shared `theme-custom` class, and its
+// actual colours are applied as CSS variables once the catalog is loaded
+// (see the generic .theme-custom rules in theme.css).
 function applyPalette(id) {
   document.body.classList.forEach(cls => {
     if (cls.startsWith('theme-')) document.body.classList.remove(cls);
   });
+  document.body.style.removeProperty('--palette-bg');
+  document.body.style.removeProperty('--palette-accent');
+  document.body.style.removeProperty('--palette-overlay');
 
-  document.body.classList.add(`theme-${id}`);
+  if (BUILTIN_PALETTE_IDS.has(id)) {
+    document.body.classList.add(`theme-${id}`);
+  } else {
+    document.body.classList.add('theme-custom');
+    ensureCatalog().then((catalog) => {
+      // Bail if the palette changed again before this resolved.
+      if (localStorage.getItem('activeTheme') !== id) return;
+      const p = catalog.customPalettes.find(cp => cp.id === id);
+      if (!p) return;
+      document.body.classList.toggle('theme-custom-dark', p.mode === 'dark');
+      document.body.style.setProperty('--palette-bg', p.primaryColor);
+      document.body.style.setProperty('--palette-accent', p.accentColor);
+      document.body.style.setProperty('--palette-overlay', hexToRgba(p.accentColor, 0.38));
+    });
+  }
   localStorage.setItem('activeTheme', id);
 }
 
 // ---------------- Token Shop (buying) ----------------
 
+// The full list of buyable multiplier/palette items — built-in plus
+// whatever the admin has added — refreshed each time the shop renders, so
+// onButtonClick (and the buy-* handlers) can look items up by id without
+// caring whether they're hardcoded or from the catalog.
+let currentMultiplierItems = [...PERMANENT_BOOSTS];
+let currentPaletteItems = [...ALL_PALETTES];
+
 function renderShop() {
+  document.querySelector('main').innerHTML = `
+    <div class="home">
+      <div class="home-title">Token Shop</div>
+      <div class="home-secondary">Loading shop...</div>
+    </div>
+  `;
+  loadAndRenderShop();
+}
+
+async function loadAndRenderShop() {
+  const catalog = await ensureCatalog();
+  pruneExpiredLimitedPalettes(catalog);
+  renderShopWithCatalog(catalog);
+}
+
+function renderShopWithCatalog(catalog) {
   const tokens = getTokens();
   const ownedPalettes = getOwnedPalettes();
 
-  const permanentBoostCards = PERMANENT_BOOSTS.map(item => {
+  currentMultiplierItems = [...PERMANENT_BOOSTS, ...catalog.customMultipliers.map(customMultiplierToItem)];
+  currentPaletteItems = [...ALL_PALETTES, ...catalog.customPalettes.map(customPaletteToItem)];
+
+  const permanentBoostCards = currentMultiplierItems.map(item => {
     const owned = item.isOwned();
     const blocked = !owned && tokens < item.price;
     return renderCard(item, 'boost', {
@@ -359,6 +498,16 @@ function renderShop() {
     }).join('');
   }
 
+  const customByTier = { simple: [], rare: [], ultra: [], limited: [] };
+  catalog.customPalettes.map(customPaletteToItem).forEach((item) => {
+    if (customByTier[item.tier]) customByTier[item.tier].push(item);
+  });
+
+  const limitedSectionHtml = customByTier.limited.length ? `
+    <div class="shop-category-title">Limited Edition Palettes (2 Weeks)</div>
+    <div class="shop-grid">${paletteGridHtml(customByTier.limited)}</div>
+  ` : '';
+
   const tutoringCards = TUTORING.map(item => {
     const blocked = tokens < item.price;
     return renderCard(item, 'tutoring', {
@@ -380,13 +529,15 @@ function renderShop() {
     <div class="shop-grid">${timedBoostCards}</div>
 
     <div class="shop-category-title">Simple Palettes</div>
-    <div class="shop-grid">${paletteGridHtml(SIMPLE_PALETTES)}</div>
+    <div class="shop-grid">${paletteGridHtml([...SIMPLE_PALETTES, ...customByTier.simple])}</div>
 
     <div class="shop-category-title">Rare Palettes</div>
-    <div class="shop-grid">${paletteGridHtml(RARE_PALETTES)}</div>
+    <div class="shop-grid">${paletteGridHtml([...RARE_PALETTES, ...customByTier.rare])}</div>
 
     <div class="shop-category-title">Ultra Special Palettes</div>
-    <div class="shop-grid">${paletteGridHtml(ULTRA_PALETTES)}</div>
+    <div class="shop-grid">${paletteGridHtml([...ULTRA_PALETTES, ...customByTier.ultra])}</div>
+
+    ${limitedSectionHtml}
 
     <div class="shop-category-title">Real-Life Tutoring</div>
     <div class="shop-grid">${tutoringCards}</div>
@@ -422,17 +573,20 @@ function onButtonClick(e) {
   const id = e.currentTarget.dataset.id;
 
   if (action === 'buy-permanent-boost') {
-    const item = PERMANENT_BOOSTS.find(b => b.id === id);
-    buyOneTimeItem(item, 'permanent-boost', item.apply);
+    const item = currentMultiplierItems.find(b => b.id === id);
+    buyOneTimeItem(item, item.isCustomMultiplier ? 'custom-multiplier' : 'permanent-boost', item.apply);
   } else if (action === 'buy-timed-boost') {
     const item = TIMED_BOOSTS.find(b => b.id === id);
     buyTimedBoost(item);
   } else if (action === 'buy-palette') {
-    const item = ALL_PALETTES.find(p => p.id === id);
+    const item = currentPaletteItems.find(p => p.id === id);
     buyOneTimeItem(item, 'palette', () => {
       const owned = getOwnedPalettes();
       owned.push(item.id);
       localStorage.setItem('ownedPalettes', JSON.stringify(owned));
+      if (item.limited) {
+        localStorage.setItem('expiry_palette_' + item.id, String(Date.now() + LIMITED_PALETTE_DURATION_MS));
+      }
     });
   } else if (action === 'buy-tutoring') {
     const item = TUTORING.find(t => t.id === id);
@@ -454,7 +608,6 @@ function buyTimedBoost(item) {
   recordPurchase(item, 'timed-boost');
   const expiryTime = new Date(getBoostExpiry(item.id)).toLocaleTimeString();
   alert(`Purchased "${item.name}"! Active until ${expiryTime}.`);
-  notifyPurchase();
   renderShop();
 }
 
@@ -463,7 +616,10 @@ function buyOneTimeItem(item, category, onSuccess) {
     alert("The competition has ended — the token shop is closed while results are being gathered.");
     return;
   }
-  if (!confirm(`Buy "${item.name}" for ${item.price} tokens?`)) return;
+  const confirmMsg = item.limited
+    ? `Buy "${item.name}" for ${item.price} tokens? It's limited-edition — active for 2 weeks from today, then it expires.`
+    : `Buy "${item.name}" for ${item.price} tokens?`;
+  if (!confirm(confirmMsg)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
     return;
@@ -471,7 +627,6 @@ function buyOneTimeItem(item, category, onSuccess) {
   onSuccess();
   recordPurchase(item, category);
   alert(`Purchased "${item.name}"!`);
-  notifyPurchase();
   renderShop();
 }
 
@@ -523,15 +678,40 @@ function buyTutoring(item) {
 
 // ---------------- Equip Palette page ----------------
 
+function formatRemaining(ms) {
+  const totalMinutes = Math.max(0, Math.round(ms / 60000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+}
+
 function renderEquipPalettePage() {
+  document.querySelector('main').innerHTML = `
+    <div class="home">
+      <div class="home-title">Equip Palette</div>
+      <div class="home-secondary">Loading...</div>
+    </div>
+  `;
+  loadAndRenderEquipPage();
+}
+
+async function loadAndRenderEquipPage() {
+  const catalog = await ensureCatalog();
+  pruneExpiredLimitedPalettes(catalog);
+  renderEquipPageWithCatalog(catalog);
+}
+
+function renderEquipPageWithCatalog(catalog) {
   const ownedPalettes = getOwnedPalettes();
   const activeTheme = localStorage.getItem('activeTheme') || 'default';
+  currentPaletteItems = [...ALL_PALETTES, ...catalog.customPalettes.map(customPaletteToItem)];
 
   function tierHtml(list) {
     return list.map(item => {
       const owned = ownedPalettes.includes(item.id);
       const active = activeTheme === item.id;
-      return renderPaletteTile(item, owned, active);
+      const remaining = item.limited && owned ? formatRemaining(getPaletteExpiry(item.id) - Date.now()) : null;
+      return renderPaletteTile(item, owned, active, remaining);
     }).join('');
   }
 
@@ -539,6 +719,16 @@ function renderEquipPalettePage() {
     renderPaletteTile(DEFAULT_PALETTE, true, activeTheme === 'default'),
     renderPaletteTile(DEFAULT_DARK_PALETTE, true, activeTheme === 'dark')
   ].join('');
+
+  const customByTier = { simple: [], rare: [], ultra: [], limited: [] };
+  catalog.customPalettes.map(customPaletteToItem).forEach((item) => {
+    if (customByTier[item.tier]) customByTier[item.tier].push(item);
+  });
+
+  const limitedSectionHtml = customByTier.limited.length ? `
+    <div class="shop-category-title">Limited Edition Palettes (2 Weeks)</div>
+    <div class="shop-grid">${tierHtml(customByTier.limited)}</div>
+  ` : '';
 
   document.querySelector('main').innerHTML = `
     <div class="home">
@@ -551,13 +741,15 @@ function renderEquipPalettePage() {
     <div class="shop-grid">${defaultTiles}</div>
 
     <div class="shop-category-title">Simple Palettes</div>
-    <div class="shop-grid">${tierHtml(SIMPLE_PALETTES)}</div>
+    <div class="shop-grid">${tierHtml([...SIMPLE_PALETTES, ...customByTier.simple])}</div>
 
     <div class="shop-category-title">Rare Palettes</div>
-    <div class="shop-grid">${tierHtml(RARE_PALETTES)}</div>
+    <div class="shop-grid">${tierHtml([...RARE_PALETTES, ...customByTier.rare])}</div>
 
     <div class="shop-category-title">Ultra Special Palettes</div>
-    <div class="shop-grid">${tierHtml(ULTRA_PALETTES)}</div>
+    <div class="shop-grid">${tierHtml([...ULTRA_PALETTES, ...customByTier.ultra])}</div>
+
+    ${limitedSectionHtml}
   `;
 
   document.querySelectorAll('.palette-equip-btn').forEach(btn => {
@@ -568,7 +760,7 @@ function renderEquipPalettePage() {
   });
 }
 
-function renderPaletteTile(item, owned, active) {
+function renderPaletteTile(item, owned, active, remaining) {
   if (!owned) {
     return `
       <div class="shop-item shop-item-palette palette-locked">
@@ -587,6 +779,7 @@ function renderPaletteTile(item, owned, active) {
       <div class="shop-frame"><img src="${item.icon}" alt="${item.name}"></div>
       <div class="shop-item-name">${item.name}</div>
       ${modeBadgeHtml(item)}
+      ${remaining ? `<div class="palette-mode-badge">⏳ Expires in ${remaining}</div>` : ''}
       ${active
         ? `<button class="shop-buy-btn shop-active-btn" disabled>Equipped</button>`
         : `<button class="shop-buy-btn shop-equip-btn palette-equip-btn" data-id="${item.id}">Equip</button>`}
