@@ -78,6 +78,26 @@ function isTimedBoostActive(id) {
   return Date.now() < (Number(localStorage.getItem('expiry_' + id + '_10h')) || 0);
 }
 
+// Custom (admin-added) timed multipliers reuse the same generic
+// 'expiry_<id>' scheme as the built-in ones above, but since their
+// multiplier VALUE isn't one of two fixed numbers (2 or 3), it's also
+// stored in a matching 'multvalue_<id>' key (see token-shop.js's
+// customMultiplierToItem) so it can be read back here without needing the
+// catalog. Takes the highest currently-active one, in case more than one
+// somehow ended up active at once.
+function getActiveCustomTimedMultiplier() {
+  let best = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith('expiry_custom-')) continue;
+    const expiry = Number(localStorage.getItem(key)) || 0;
+    if (Date.now() >= expiry) continue;
+    const value = Number(localStorage.getItem('multvalue_' + key.slice('expiry_'.length))) || 0;
+    if (value > best) best = value;
+  }
+  return best;
+}
+
 // The admin dashboard should see EVERY game a player starts — not just ones
 // that finish or get caught cheating — so a game abandoned mid-way (closed
 // tab, navigated back home early) still shows up. So instead of writing one
@@ -138,8 +158,8 @@ function runGame(config) {
   }
 
   const permanentMultiplier = Number(localStorage.getItem('tokenMultiplier')) || 1;
-  const timedMultiplier = isTimedBoostActive('x3tokens') ? 3 : isTimedBoostActive('x2tokens') ? 2 : 1;
-  const tokenMultiplier = Math.max(permanentMultiplier, timedMultiplier);
+  const builtInTimedMultiplier = isTimedBoostActive('x3tokens') ? 3 : isTimedBoostActive('x2tokens') ? 2 : 1;
+  const tokenMultiplier = Math.max(permanentMultiplier, builtInTimedMultiplier, getActiveCustomTimedMultiplier());
 
   const permanentBonusSeconds = Number(localStorage.getItem('extraSeconds')) || 0;
   const timedBonusSeconds = isTimedBoostActive('extra30') ? 30 : isTimedBoostActive('extra15') ? 15 : 0;
