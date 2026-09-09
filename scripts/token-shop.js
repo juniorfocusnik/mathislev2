@@ -327,15 +327,39 @@ function hexToRgba(hex, alpha) {
 }
 
 // Adapts a catalog multiplier entry into the same shape as a PERMANENT_BOOSTS
-// item, so the rest of the shop code (rendering, buying, admin grant list)
-// can treat built-in and custom multipliers identically.
+// (duration 'forever') or TIMED_BOOSTS (duration '10h') item, so the rest of
+// the shop code (rendering, buying, admin grant list) can treat built-in and
+// custom multipliers identically either way.
+//
+// A '10h' one reuses the exact 'expiry_<id>' scheme the built-in timed
+// boosts use (via activateBoost/isBoostActive/getBoostExpiry, all generic by
+// id already) — but since the *value* isn't fixed like x2/x3, it's also
+// stashed in a matching 'multvalue_<id>' key so game-engine.js can read it
+// back synchronously at game start without needing the catalog.
 function customMultiplierToItem(m) {
+  const icon = m.icon || multiplierIconDataUri(m.multiplier);
+  if (m.duration === '10h') {
+    return {
+      id: m.id,
+      name: m.name,
+      desc: `Multiplies every correct answer's tokens by ${m.multiplier}, in every game, for 10 hours.`,
+      price: m.price,
+      icon,
+      isCustomMultiplier: true,
+      isTimed: true,
+      multiplier: m.multiplier,
+      activate: () => {
+        activateBoost(m.id);
+        localStorage.setItem('multvalue_' + m.id, String(m.multiplier));
+      }
+    };
+  }
   return {
     id: m.id,
     name: m.name,
     desc: `Permanently multiplies every correct answer's tokens by ${m.multiplier}, forever.`,
     price: m.price,
-    icon: m.icon || multiplierIconDataUri(m.multiplier),
+    icon,
     isOwned: () => getMultiplierTier() >= m.multiplier,
     apply: () => setMultiplierTier(m.multiplier),
     isCustomMultiplier: true,
@@ -452,6 +476,7 @@ function applyPalette(id) {
 // onButtonClick (and the buy-* handlers) can look items up by id without
 // caring whether they're hardcoded or from the catalog.
 let currentMultiplierItems = [...PERMANENT_BOOSTS];
+let currentTimedItems = [...TIMED_BOOSTS];
 let currentPaletteItems = [...ALL_PALETTES];
 
 function renderShop() {
@@ -474,7 +499,9 @@ function renderShopWithCatalog(catalog) {
   const tokens = getTokens();
   const ownedPalettes = getOwnedPalettes();
 
-  currentMultiplierItems = [...PERMANENT_BOOSTS, ...catalog.customMultipliers.map(customMultiplierToItem)];
+  const customMultiplierItems = catalog.customMultipliers.map(customMultiplierToItem);
+  currentMultiplierItems = [...PERMANENT_BOOSTS, ...customMultiplierItems.filter(i => !i.isTimed)];
+  currentTimedItems = [...TIMED_BOOSTS, ...customMultiplierItems.filter(i => i.isTimed)];
   currentPaletteItems = [...ALL_PALETTES, ...catalog.customPalettes.map(customPaletteToItem)];
 
   const permanentBoostCards = currentMultiplierItems.map(item => {
@@ -487,7 +514,7 @@ function renderShopWithCatalog(catalog) {
     });
   }).join('');
 
-  const timedBoostCards = TIMED_BOOSTS.map(item => {
+  const timedBoostCards = currentTimedItems.map(item => {
     const active = isBoostActive(item.id);
     const blocked = !active && tokens < item.price;
     let buttonHtml;
@@ -591,7 +618,7 @@ function onButtonClick(e) {
     const item = currentMultiplierItems.find(b => b.id === id);
     buyOneTimeItem(item, item.isCustomMultiplier ? 'custom-multiplier' : 'permanent-boost', item.apply);
   } else if (action === 'buy-timed-boost') {
-    const item = TIMED_BOOSTS.find(b => b.id === id);
+    const item = currentTimedItems.find(b => b.id === id);
     buyTimedBoost(item);
   } else if (action === 'buy-palette') {
     const item = currentPaletteItems.find(p => p.id === id);
@@ -619,8 +646,8 @@ function buyTimedBoost(item) {
     alert("You don't have enough tokens for that yet!");
     return;
   }
-  activateBoost(item.id);
-  recordPurchase(item, 'timed-boost');
+  if (item.activate) item.activate(); else activateBoost(item.id);
+  recordPurchase(item, item.isCustomMultiplier ? 'custom-multiplier' : 'timed-boost');
   const expiryTime = new Date(getBoostExpiry(item.id)).toLocaleTimeString();
   alert(`Purchased "${item.name}"! Active until ${expiryTime}.`);
   renderShop();
