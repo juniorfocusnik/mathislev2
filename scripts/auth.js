@@ -72,14 +72,18 @@ const nativeSetItem = Storage.prototype.setItem;
 let currentUid = null;
 let pushTimer = null;
 
-// Limited-edition palettes each get their own 'expiry_palette_<id>' key,
-// one per admin-added palette — an open-ended set that can't be listed
-// upfront like the fixed SYNCED_KEYS above, so it's matched by prefix instead.
-function isPaletteExpiryKey(key) {
-  return key.startsWith('expiry_palette_');
+// Limited-edition palettes and 10-hour custom multipliers each get their own
+// dynamically-named keys ('expiry_palette_<id>', 'expiry_<custom-mult-id>',
+// 'multvalue_<custom-mult-id>') — one per admin-added item, an open-ended set
+// that can't be listed upfront like the fixed SYNCED_KEYS above, so it's
+// matched by prefix instead. Every existing fixed 'expiry_...' key already
+// starts with 'expiry_' too, so this is a superset of (not a replacement
+// for) checking SYNCED_KEYS.
+function isDynamicSyncedKey(key) {
+  return key.startsWith('expiry_') || key.startsWith('multvalue_');
 }
 function isSyncedKey(key) {
-  return SYNCED_KEYS.includes(key) || isPaletteExpiryKey(key);
+  return SYNCED_KEYS.includes(key) || isDynamicSyncedKey(key);
 }
 
 // Push a debounced snapshot of the synced keys to Firestore. Debounced so a
@@ -99,7 +103,7 @@ function pushToCloud(uid) {
   }
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && isPaletteExpiryKey(key)) data[key] = localStorage.getItem(key);
+    if (key && isDynamicSyncedKey(key) && !SYNCED_KEYS.includes(key)) data[key] = localStorage.getItem(key);
   }
   return setDoc(doc(db, 'users', uid), data, { merge: true }).catch((err) => {
     console.error('Failed to sync progress to Firebase:', err);
@@ -117,15 +121,18 @@ async function pullFromCloud(uid) {
         localStorage.removeItem(key);
       }
     }
-    // Restore whichever limited-palette expiry keys the cloud doc has, and
-    // drop any stale local ones it doesn't (mirrors the SYNCED_KEYS loop above).
-    const cloudExpiryKeys = new Set(Object.keys(data).filter(isPaletteExpiryKey));
-    for (const key of cloudExpiryKeys) {
+    // Restore whichever dynamic keys (limited-palette / custom-timed-
+    // multiplier expiry+value) the cloud doc has, and drop any stale local
+    // ones it doesn't (mirrors the SYNCED_KEYS loop above).
+    const cloudDynamicKeys = new Set(
+      Object.keys(data).filter((k) => isDynamicSyncedKey(k) && !SYNCED_KEYS.includes(k))
+    );
+    for (const key of cloudDynamicKeys) {
       nativeSetItem.call(localStorage, key, data[key]);
     }
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
-      if (key && isPaletteExpiryKey(key) && !cloudExpiryKeys.has(key)) {
+      if (key && isDynamicSyncedKey(key) && !SYNCED_KEYS.includes(key) && !cloudDynamicKeys.has(key)) {
         localStorage.removeItem(key);
       }
     }
@@ -136,7 +143,7 @@ function clearLocalCache() {
   for (const key of SYNCED_KEYS) localStorage.removeItem(key);
   for (let i = localStorage.length - 1; i >= 0; i--) {
     const key = localStorage.key(i);
-    if (key && isPaletteExpiryKey(key)) localStorage.removeItem(key);
+    if (key && isDynamicSyncedKey(key)) localStorage.removeItem(key);
   }
   sessionStorage.removeItem('tokens');
 }
@@ -272,7 +279,8 @@ async function adminAdjustTokens(uid, delta) {
 // display name (for the admin log entry). `extra` carries category-specific
 // info the catalog knows but this function doesn't look up itself:
 // `{ limited: true }` for a limited-edition palette (starts its 14-day
-// countdown immediately), `{ multiplier: N }` for a custom multiplier tier.
+// countdown immediately), `{ multiplier: N, duration: 'forever' | '10h' }`
+// for a custom multiplier tier.
 async function adminGrantItem(uid, category, id, name, extra = {}) {
   const snap = await getDoc(doc(db, 'users', uid));
   const data = snap.exists() ? snap.data() : {};
@@ -304,8 +312,13 @@ async function adminGrantItem(uid, category, id, name, extra = {}) {
       updates['expiry_palette_' + id] = String(Date.now() + 14 * 24 * 60 * 60 * 1000);
     }
   } else if (category === 'custom-multiplier') {
-    const mult = Number(data.tokenMultiplier) || 1;
-    updates.tokenMultiplier = String(Math.max(mult, Number(extra.multiplier) || 1));
+    if (extra.duration === '10h') {
+      updates['expiry_' + id] = String(Date.now() + 10 * 60 * 60 * 1000);
+      updates['multvalue_' + id] = String(extra.multiplier);
+    } else {
+      const mult = Number(data.tokenMultiplier) || 1;
+      updates.tokenMultiplier = String(Math.max(mult, Number(extra.multiplier) || 1));
+    }
   }
 
   updates.adminLog = appendAdminLog(data, {
@@ -404,9 +417,13 @@ async function adminAddPalette({ name, price, tier, mode, primaryColor, accentCo
   return id;
 }
 
-// Admin-only: adds a brand-new permanent token multiplier tier (e.g. x5, x10)
-// to the shop catalog, on top of the built-in x2/x3. `icon` — see adminAddPalette.
-async function adminAddMultiplier({ name, multiplier, price, icon }) {
+// Admin-only: adds a brand-new token multiplier tier (e.g. x5, x10) to the
+// shop catalog, on top of the built-in x2/x3. `duration` is 'forever' (owned
+// permanently, like the built-in ones) or '10h' (active for 10 hours from
+// purchase/grant, like the built-in timed boosts — see token-shop.js's
+// customMultiplierToItem and game-engine.js's active-custom-multiplier scan).
+// `icon` — see adminAddPalette.
+async function adminAddMultiplier({ name, multiplier, price, duration, icon }) {
   const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
   const data = snap.exists() ? snap.data() : {};
   let customMultipliers = [];
@@ -415,6 +432,7 @@ async function adminAddMultiplier({ name, multiplier, price, icon }) {
   const id = 'custom-x' + safeMultiplier + '-' + Math.random().toString(36).slice(2, 7);
   const entry = {
     id, name, multiplier: safeMultiplier, price: Math.max(0, Number(price) || 0),
+    duration: duration === '10h' ? '10h' : 'forever',
     createdAt: Date.now()
   };
   if (icon) entry.icon = icon;
