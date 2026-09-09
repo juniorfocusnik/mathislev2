@@ -4,7 +4,8 @@ import {
   logIn, logOut, watchAuthState,
   getAllUserData, adminAdjustTokens, adminGrantItem,
   adminCreateAccount, adminDeleteAccount,
-  getCompetitionFrozen, setCompetitionFrozen
+  getCompetitionFrozen, setCompetitionFrozen,
+  getCatalog, adminAddPalette, adminAddMultiplier
 } from './auth.js';
 
 function setTokens() {
@@ -16,6 +17,10 @@ function setTokens() {
 // mirrors to the player's Firebase account in the background. There is no
 // manual save step anymore.
 let accountName = null;
+// Full username (unlike accountName, which is truncated to first name for
+// display) — needed to check exactly who's allowed to even attempt the
+// admin password, since two people can share a first name.
+let fullUsername = null;
 let tokens = 0;
 // Refreshed on every page load from Firestore (see the watchAuthState
 // bootstrap at the bottom of this file). While true, awardTokens/spendTokens/
@@ -33,13 +38,18 @@ const tit = '<div class="home-title">';
 const lib = '<img class="library-image" src="images/library-images/n';
 const libEnd = '.png">';
 
-// Client-side gate for the ?page=admin token dashboard. This only hides the
-// UI from casual visitors — see the "allow list" note in auth.js for why
-// it isn't real server-side security.
+// Client-side gate for the admin dashboard. This only hides the UI from
+// casual visitors — see the "allow list" note in auth.js for why it isn't
+// real server-side security. Deliberately obscure page name so it isn't
+// guessable, PLUS a username allowlist below so even someone who somehow
+// gets the URL and password still can't get in unless they're signed in as
+// one of these two accounts.
+const ADMIN_PAGE = 'denysisthebestmathematicianintheentirehumongousworld';
 const ADMIN_PASSWORD = "[.OFHmzaxGq9bCwb{QBc5R3%W[&TrSpMM-U.Dzrp0'wM.!yzLo";
+const ADMIN_ALLOWED_USERNAMES = ['Hugo K', 'Denys K'];
 
 function renderPage() {
-if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('page') !== 'admin') {
+if (accountName === null && urlParams.get('page') !== 'login') {
   document.querySelector('main').innerHTML = `<div class="login-precaution">Please <a href="index.html?page=login">log in</a> to play Mathisle-v2. Your tokens, boosts and palettes are stored on your account.</div>`
 } else if (accountName !== null && urlParams.get('page') === 'login') {
   document.querySelector('main').innerHTML = `<div class="login"><div class="login-title">Come back to the homepage!<br>You are already logged in as ${accountName}.</div></div>`
@@ -54,7 +64,14 @@ if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('
   `;
   localStorage.setItem('shoutoutdone', 'false');
   applyPalette("default");
-} else if (urlParams.get('page') === 'admin') {
+} else if (urlParams.get('page') === ADMIN_PAGE && !ADMIN_ALLOWED_USERNAMES.includes(fullUsername)) {
+  document.querySelector('main').innerHTML = `
+      <div class="home">
+        ${tit}Not Available</div>
+        ${sec}This page isn't available on your account.</div>
+      </div>
+  `;
+} else if (urlParams.get('page') === ADMIN_PAGE) {
   document.querySelector('main').innerHTML = `
       <div class="home">
         ${tit}Admin: Player Dashboard</div>
@@ -1651,7 +1668,7 @@ if (accountName === null && urlParams.get('page') !== 'login' && urlParams.get('
 }
 
 // ============================================================
-// ADMIN DASHBOARD (?page=admin)
+// ADMIN DASHBOARD (see ADMIN_PAGE above for the URL, ADMIN_ALLOWED_USERNAMES for who can use it)
 // ============================================================
 // Everything below builds the password-gated leaderboard + per-player stats
 // + give/remove-tokens + free-grant-item panel. See auth.js for the
@@ -1666,11 +1683,17 @@ const DIFFICULTY_LABELS = {
   ultimateDenys: 'Ultimate Denys'
 };
 
-const GRANTABLE_ITEMS = [
-  ...PERMANENT_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'permanent-boost' })),
-  ...TIMED_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'timed-boost' })),
-  ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette' }))
-];
+// Built-in items plus whatever's in the admin-added catalog (custom
+// palettes / multiplier tiers) — everything the "Grant Free" dropdown offers.
+function buildGrantableItems(catalog) {
+  return [
+    ...PERMANENT_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'permanent-boost', extra: {} })),
+    ...TIMED_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'timed-boost', extra: {} })),
+    ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: {} })),
+    ...catalog.customMultipliers.map(m => ({ id: m.id, name: m.name, category: 'custom-multiplier', extra: { multiplier: m.multiplier } })),
+    ...catalog.customPalettes.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: { limited: p.tier === 'limited' } }))
+  ];
+}
 
 // Every game a player has finished (see gameHistory) plus every purchase
 // (purchaseHistory) plus every admin give/remove/grant (adminLog) rolls up
@@ -1834,15 +1857,90 @@ function openCreateAccountModal() {
   });
 }
 
+// New palettes get a generated colour-swatch icon immediately (see
+// token-shop.js's paletteSwatchDataUri) — no artwork needed to work. Ask
+// Claude for a real custom icon for a specific palette whenever you want one.
+function openAddPaletteModal() {
+  openMathisleModal({
+    title: 'Add New Palette',
+    confirmLabel: 'Add Palette',
+    bodyHtml: `
+      <input class="login-inputbox" type="text" id="new-palette-name" placeholder="Palette name...">
+      <input class="login-inputbox" type="number" id="new-palette-price" placeholder="Price (tokens)..." min="0">
+      <div class="admin-action-row">
+        <label>Tier:
+          <select id="new-palette-tier">
+            <option value="simple">Simple</option>
+            <option value="rare">Rare</option>
+            <option value="ultra">Ultra Special</option>
+            <option value="limited">Limited Edition (2 weeks)</option>
+          </select>
+        </label>
+      </div>
+      <div class="admin-action-row">
+        <label>Mode:
+          <select id="new-palette-mode">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+      <div class="admin-action-row">
+        <label>Background: <input type="color" id="new-palette-primary" value="#eaf8ff"></label>
+        <label>Accent: <input type="color" id="new-palette-accent" value="#0090c8"></label>
+      </div>
+    `,
+    onConfirm: async (overlay) => {
+      const name = overlay.querySelector('#new-palette-name').value.trim();
+      const price = Number(overlay.querySelector('#new-palette-price').value);
+      if (!name) throw new Error('Please enter a palette name.');
+      if (!price || price <= 0) throw new Error('Please enter a price.');
+      await adminAddPalette({
+        name,
+        price,
+        tier: overlay.querySelector('#new-palette-tier').value,
+        mode: overlay.querySelector('#new-palette-mode').value,
+        primaryColor: overlay.querySelector('#new-palette-primary').value,
+        accentColor: overlay.querySelector('#new-palette-accent').value
+      });
+      unlockAdminDashboard();
+    }
+  });
+}
+
+// New multiplier tiers get a generated "x5"-style badge icon automatically —
+// no artwork needed since it's just a number.
+function openAddMultiplierModal() {
+  openMathisleModal({
+    title: 'Add New Multiplier',
+    confirmLabel: 'Add Multiplier',
+    bodyHtml: `
+      <input class="login-inputbox" type="text" id="new-mult-name" placeholder="Name (e.g. x5 Tokens Forever)...">
+      <input class="login-inputbox" type="number" id="new-mult-value" placeholder="Multiplier (e.g. 5)..." min="2">
+      <input class="login-inputbox" type="number" id="new-mult-price" placeholder="Price (tokens)..." min="0">
+    `,
+    onConfirm: async (overlay) => {
+      const name = overlay.querySelector('#new-mult-name').value.trim();
+      const multiplier = Number(overlay.querySelector('#new-mult-value').value);
+      const price = Number(overlay.querySelector('#new-mult-price').value);
+      if (!name) throw new Error('Please enter a name.');
+      if (!multiplier || multiplier < 2) throw new Error('Multiplier must be 2 or more.');
+      if (!price || price <= 0) throw new Error('Please enter a price.');
+      await adminAddMultiplier({ name, multiplier, price });
+      unlockAdminDashboard();
+    }
+  });
+}
+
 async function unlockAdminDashboard(openUid) {
   const resultsEl = document.querySelector('#admin-results');
   const errorEl = document.querySelector('#admin-error');
   if (!resultsEl) return; // navigated away before this resolved
   resultsEl.innerHTML = 'Loading...';
   try {
-    const [users, frozen] = await Promise.all([getAllUserData(), getCompetitionFrozen()]);
+    const [users, frozen, catalog] = await Promise.all([getAllUserData(), getCompetitionFrozen(), getCatalog()]);
     users.forEach((u) => { u.stats = computeUserStats(u); });
-    resultsEl.innerHTML = renderAdminDashboardHtml(users, frozen);
+    resultsEl.innerHTML = renderAdminDashboardHtml(users, frozen, catalog);
     wireAdminDashboard();
     if (openUid) {
       const row = document.querySelector(`#admin-detail-${cssEscape(openUid)}`);
@@ -1860,8 +1958,13 @@ function cssEscape(id) {
   return window.CSS && CSS.escape ? CSS.escape(id) : id;
 }
 
-function renderAdminDashboardHtml(users, frozen) {
-  const grantOptionsHtml = GRANTABLE_ITEMS.map(i => `<option value="${i.category}|${i.id}|${i.name}">${i.name}</option>`).join('');
+let currentGrantableItems = [];
+
+function renderAdminDashboardHtml(users, frozen, catalog) {
+  currentGrantableItems = buildGrantableItems(catalog);
+  const grantOptionsHtml = currentGrantableItems.map((i, idx) =>
+    `<option value="${idx}">${i.name}</option>`
+  ).join('');
   const sortOptionsHtml = ADMIN_SORT_OPTIONS.map(o =>
     `<option value="${o.value}"${o.value === adminSortMode ? ' selected' : ''}>${o.label}</option>`
   ).join('');
@@ -1879,7 +1982,7 @@ function renderAdminDashboardHtml(users, frozen) {
       </td>
     </tr>
     <tr class="admin-detail-row" id="admin-detail-${u.uid}" style="display:none">
-      <td colspan="4">${buildAdminDetailHtml(u, grantOptionsHtml)}</td>
+      <td colspan="4">${buildAdminDetailHtml(u, grantOptionsHtml, catalog)}</td>
     </tr>
   `).join('');
 
@@ -1887,6 +1990,8 @@ function renderAdminDashboardHtml(users, frozen) {
     <div class="admin-dashboard">
       <div class="admin-toolbar">
         <button id="admin-create-account-btn" class="login-finish">+ Create New Account</button>
+        <button id="admin-add-palette-btn" class="login-finish">+ Add New Palette</button>
+        <button id="admin-add-multiplier-btn" class="login-finish">+ Add New Multiplier</button>
         <button id="admin-freeze-btn" class="login-finish ${frozen ? 'admin-freeze-active' : ''}">
           ${frozen ? 'Competition Frozen — Click to Unfreeze' : 'Freeze Competition'}
         </button>
@@ -1896,6 +2001,7 @@ function renderAdminDashboardHtml(users, frozen) {
         ? 'Games, the token shop, and cheat penalties are all disabled right now — nobody\'s token count can change.'
         : 'Everything is live — playing games and shopping still changes token counts normally.'}</div>
       <div class="home-secondary">Admin changes made: ${globalStats.totalChanges} | Items given free: ${globalStats.totalItemsFree} | Net tokens from admin changes: ${globalStats.netDiff >= 0 ? '+' : ''}${globalStats.netDiff}</div>
+      <div class="home-secondary">Custom palettes in shop: ${catalog.customPalettes.length} | Custom multipliers in shop: ${catalog.customMultipliers.length}</div>
       <table class="admin-table admin-leaderboard">
         <tr><th>#</th><th>Name</th><th>Tokens</th><th></th></tr>
         ${rows}
@@ -1924,6 +2030,16 @@ function formatDuration(ms) {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return `${h}h ${m}m`;
+}
+
+// Same idea as formatDuration but day-aware — the 10-hour boosts never need
+// more than "Xh Ym", but the 2-week limited palettes would show a silly
+// "335h 58m" without this.
+function formatDurationDays(ms) {
+  const totalMinutes = Math.max(0, Math.round(ms / 60000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
 }
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -1957,7 +2073,7 @@ function describeAdminLogEntry(e) {
   return 'Unknown change';
 }
 
-function buildAdminDetailHtml(u, grantOptionsHtml) {
+function buildAdminDetailHtml(u, grantOptionsHtml, catalog) {
   const totalGames = u.gameHistory.length;
   const totalCorrect = u.gameHistory.reduce((s, g) => s + (g.correct || 0), 0);
   const totalWrong = u.gameHistory.reduce((s, g) => s + (g.wrong || 0), 0);
@@ -1974,16 +2090,22 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
     return `<tr><td>${DIFFICULTY_LABELS[key]}</td><td>${d.correct + d.wrong}</td><td>${d.correct}</td><td>${d.wrong}</td></tr>`;
   }).join('');
 
-  const recentGamesRows = [...u.gameHistory].reverse().slice(0, 15).map((g) => `
+  const recentGamesRows = [...u.gameHistory].reverse().slice(0, 15).map((g) => {
+    let status;
+    if (g.cheated) status = `Cheated (-${g.tokensLost || 0})`;
+    else if (g.completed) status = 'Completed';
+    else status = 'Abandoned'; // game was started (so it's logged) but never finished or got caught
+    return `
     <tr>
       <td>${DIFFICULTY_LABELS[g.difficulty] || g.difficulty}</td>
       <td>${g.correct}</td>
       <td>${g.wrong}</td>
       <td>${g.tokensEarned}</td>
-      <td>${g.cheated ? `Yes (-${g.tokensLost || 0})` : 'No'}</td>
+      <td>${status}</td>
       <td>${formatTimestamp(g.timestamp)}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   const purchaseCounts = {};
   u.purchaseHistory.forEach((p) => { purchaseCounts[p.name] = (purchaseCounts[p.name] || 0) + 1; });
@@ -1991,10 +2113,16 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
     ? Object.entries(purchaseCounts).map(([name, count]) => `<tr><td>${name}</td><td>${count}</td></tr>`).join('')
     : '<tr><td colspan="2">No purchases yet.</td></tr>';
 
-  const foreverRows = PERMANENT_BOOSTS.map((b) => {
-    const owned = isPermanentBoostOwned(u, b.id);
-    return `<tr><td>${b.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
-  }).join('');
+  const foreverRows = [
+    ...PERMANENT_BOOSTS.map((b) => {
+      const owned = isPermanentBoostOwned(u, b.id);
+      return `<tr><td>${b.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
+    }),
+    ...catalog.customMultipliers.map((m) => {
+      const owned = u.tokenMultiplier >= m.multiplier;
+      return `<tr><td>${m.name}</td><td>${owned ? 'Owned' : '—'}</td></tr>`;
+    })
+  ].join('');
 
   const now = Date.now();
   const timedRows = TIMED_BOOSTS.map((b) => {
@@ -2004,6 +2132,17 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
     const remainingMs = expiry - now;
     const usedMs = (10 * 60 * 60 * 1000) - remainingMs;
     return `<tr><td>${b.name}</td><td>Active</td><td>${formatDuration(usedMs)}</td><td>${formatDuration(remainingMs)}</td></tr>`;
+  }).join('');
+
+  const LIMITED_PALETTE_MS = 14 * 24 * 60 * 60 * 1000;
+  const limitedPalettes = catalog.customPalettes.filter((p) => p.tier === 'limited');
+  const limitedRows = limitedPalettes.map((p) => {
+    const expiry = Number(u.raw['expiry_palette_' + p.id]) || 0;
+    const active = now < expiry;
+    if (!active) return `<tr><td>${p.name}</td><td>Not active</td><td>—</td><td>—</td></tr>`;
+    const remainingMs = expiry - now;
+    const usedMs = LIMITED_PALETTE_MS - remainingMs;
+    return `<tr><td>${p.name}</td><td>Active</td><td>${formatDurationDays(usedMs)}</td><td>${formatDurationDays(remainingMs)}</td></tr>`;
   }).join('');
 
   const s = u.stats;
@@ -2039,7 +2178,7 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
 
         <h4>Recent Games (last 15)</h4>
         <table class="admin-table">
-          <tr><th>Difficulty</th><th>Correct</th><th>Wrong</th><th>Tokens</th><th>Cheated</th><th>When</th></tr>
+          <tr><th>Difficulty</th><th>Correct</th><th>Wrong</th><th>Tokens</th><th>Status</th><th>When</th></tr>
           ${recentGamesRows || '<tr><td colspan="6">No games played yet.</td></tr>'}
         </table>
       </div>
@@ -2062,6 +2201,14 @@ function buildAdminDetailHtml(u, grantOptionsHtml) {
           <tr><th>Boost</th><th>Status</th><th>Used</th><th>Remaining</th></tr>
           ${timedRows}
         </table>
+
+        ${limitedPalettes.length ? `
+        <h4>Limited Edition Palettes (2 Weeks)</h4>
+        <table class="admin-table">
+          <tr><th>Palette</th><th>Status</th><th>Used</th><th>Remaining</th></tr>
+          ${limitedRows}
+        </table>
+        ` : ''}
 
         <h4>Palettes Owned (${u.ownedPalettes.length})</h4>
         <div class="home-secondary">${u.ownedPalettes.join(', ') || 'None'}</div>
@@ -2120,8 +2267,10 @@ function wireAdminDashboard() {
   document.querySelectorAll('.admin-grant-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const uid = btn.dataset.uid;
-      const [category, id, name] = document.querySelector(`#admin-grant-select-${cssEscape(uid)}`).value.split('|');
-      await adminGrantItem(uid, category, id, name);
+      const idx = Number(document.querySelector(`#admin-grant-select-${cssEscape(uid)}`).value);
+      const item = currentGrantableItems[idx];
+      if (!item) return;
+      await adminGrantItem(uid, item.category, item.id, item.name, item.extra);
       unlockAdminDashboard(uid);
     });
   });
@@ -2134,6 +2283,12 @@ function wireAdminDashboard() {
 
   const createBtn = document.querySelector('#admin-create-account-btn');
   if (createBtn) createBtn.addEventListener('click', openCreateAccountModal);
+
+  const addPaletteBtn = document.querySelector('#admin-add-palette-btn');
+  if (addPaletteBtn) addPaletteBtn.addEventListener('click', openAddPaletteModal);
+
+  const addMultiplierBtn = document.querySelector('#admin-add-multiplier-btn');
+  if (addMultiplierBtn) addMultiplierBtn.addEventListener('click', openAddMultiplierModal);
 
   const freezeBtn = document.querySelector('#admin-freeze-btn');
   if (freezeBtn) {
@@ -2247,6 +2402,7 @@ function spendTokens(amount) {
 // has already been pulled into localStorage, so tokens/theme reflect the
 // signed-in account before anything renders.
 watchAuthState(async (user) => {
+  fullUsername = user ? (user.displayName || user.email) : null;
   accountName = user ? (user.displayName || user.email).split(' ')[0] : null;
   tokens = Number(localStorage.getItem('tokens')) || 0;
   setTokens();
