@@ -78,19 +78,51 @@ function isTimedBoostActive(id) {
   return Date.now() < (Number(localStorage.getItem('expiry_' + id + '_10h')) || 0);
 }
 
-// Appends one finished game to a capped history log, synced to Firebase like
-// everything else — this is what the admin dashboard's per-player stats and
-// game log are built from.
-function recordGameResult(entry) {
-  let history = [];
+// The admin dashboard should see EVERY game a player starts — not just ones
+// that finish or get caught cheating — so a game abandoned mid-way (closed
+// tab, navigated back home early) still shows up. So instead of writing one
+// history entry only at the end, startGameRecord() writes a placeholder the
+// MOMENT a game begins (synchronously, so it's on disk before anything else
+// can happen), and updateGameRecord() patches that same entry in place as
+// the game progresses and finishes.
+function readGameHistory() {
   try {
-    history = JSON.parse(localStorage.getItem('gameHistory')) || [];
+    return JSON.parse(localStorage.getItem('gameHistory')) || [];
   } catch {
-    history = [];
+    return [];
   }
-  history.push(entry);
+}
+
+function writeGameHistory(history) {
   if (history.length > 200) history = history.slice(-200);
   localStorage.setItem('gameHistory', JSON.stringify(history));
+}
+
+function startGameRecord(config) {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const history = readGameHistory();
+  history.push({
+    id,
+    difficulty: config.key,
+    correct: 0,
+    wrong: 0,
+    tokensEarned: 0,
+    normalEarned: 0,
+    bonusEarned: 0,
+    cheated: false,
+    completed: false,
+    timestamp: Date.now()
+  });
+  writeGameHistory(history);
+  return id;
+}
+
+function updateGameRecord(id, patch) {
+  const history = readGameHistory();
+  const idx = history.findIndex((g) => g.id === id);
+  if (idx === -1) return;
+  history[idx] = { ...history[idx], ...patch };
+  writeGameHistory(history);
 }
 
 function runGame(config) {
@@ -126,6 +158,7 @@ function runGame(config) {
 
   const startTime = Date.now();
   const endTime = startTime + durationMs;
+  const gameRecordId = startGameRecord(config);
 
   let questionsDone = 0;
   let correctCount = 0;
@@ -231,16 +264,14 @@ function runGame(config) {
     window.removeEventListener('focus', onWindowFocus);
 
     const deducted = penalizeTabSwitch();
-    recordGameResult({
-      difficulty: config.key,
+    updateGameRecord(gameRecordId, {
       correct: correctCount,
       wrong: questionsDone - correctCount,
       tokensEarned: runTokensEarned,
       normalEarned: runNormalEarned,
       bonusEarned: runBonusEarned,
       cheated: true,
-      tokensLost: deducted,
-      timestamp: Date.now()
+      tokensLost: deducted
     });
     alert(`Cheating detected! You switched tabs or windows during the game.\n\nYou lost ${deducted} tokens.\n\nYou are being redirected back home.`);
     window.location.href = 'index.html?page=home';
@@ -362,15 +393,14 @@ function runGame(config) {
     window.removeEventListener('blur', onWindowBlur);
     window.removeEventListener('focus', onWindowFocus);
 
-    recordGameResult({
-      difficulty: config.key,
+    updateGameRecord(gameRecordId, {
       correct: correctCount,
       wrong: questionsDone - correctCount,
       tokensEarned: runTokensEarned,
       normalEarned: runNormalEarned,
       bonusEarned: runBonusEarned,
       cheated: false,
-      timestamp: Date.now()
+      completed: true
     });
 
     document.querySelector('main').innerHTML = `
