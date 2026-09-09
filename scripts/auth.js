@@ -238,9 +238,12 @@ async function adminAdjustTokens(uid, delta) {
 
 // Admin-only: grants a boost or palette to a player for free, without
 // touching their tokens. `category` is 'permanent-boost' | 'timed-boost' |
-// 'palette', `id` is the item's id from token-shop.js's item lists, `name`
-// is its display name (for the admin log entry).
-async function adminGrantItem(uid, category, id, name) {
+// 'palette' | 'custom-multiplier', `id` is the item's id, `name` is its
+// display name (for the admin log entry). `extra` carries category-specific
+// info the catalog knows but this function doesn't look up itself:
+// `{ limited: true }` for a limited-edition palette (starts its 14-day
+// countdown immediately), `{ multiplier: N }` for a custom multiplier tier.
+async function adminGrantItem(uid, category, id, name, extra = {}) {
   const snap = await getDoc(doc(db, 'users', uid));
   const data = snap.exists() ? snap.data() : {};
   const updates = {};
@@ -267,6 +270,12 @@ async function adminGrantItem(uid, category, id, name) {
     try { owned = JSON.parse(data.ownedPalettes) || []; } catch {}
     if (!owned.includes(id)) owned.push(id);
     updates.ownedPalettes = JSON.stringify(owned);
+    if (extra.limited) {
+      updates['expiry_palette_' + id] = String(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    }
+  } else if (category === 'custom-multiplier') {
+    const mult = Number(data.tokenMultiplier) || 1;
+    updates.tokenMultiplier = String(Math.max(mult, Number(extra.multiplier) || 1));
   }
 
   updates.adminLog = appendAdminLog(data, {
@@ -317,9 +326,68 @@ async function setCompetitionFrozen(frozen) {
   await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { competitionFrozen: frozen }, { merge: true });
 }
 
+function slugify(name) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+}
+
+// The shop's item catalog (built-in items live as hardcoded lists in
+// token-shop.js; anything the admin adds lives here instead, on the same
+// shared "_meta" doc) so token-shop.js can merge both into one shop without
+// needing code changes every time the admin adds something.
+async function getCatalog() {
+  const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
+  const data = snap.exists() ? snap.data() : {};
+  let customPalettes = [];
+  let customMultipliers = [];
+  try { customPalettes = JSON.parse(data.customPalettes) || []; } catch {}
+  try { customMultipliers = JSON.parse(data.customMultipliers) || []; } catch {}
+  return { customPalettes, customMultipliers };
+}
+
+// Admin-only: adds a brand-new palette to the shop catalog. `tier` is
+// 'simple' | 'rare' | 'ultra' | 'limited' — 'limited' means it expires 14
+// days after a player buys/is granted it (see adminGrantItem's 'palette'
+// branch and token-shop.js's expiry pruning). `primaryColor`/`accentColor`
+// are hex strings the player picks — token-shop.js applies them as CSS
+// variables (no per-palette CSS file changes needed). `mode` is 'light' or
+// 'dark' (controls text-colour handling and the shop's mode badge).
+async function adminAddPalette({ name, price, tier, mode, primaryColor, accentColor }) {
+  const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
+  const data = snap.exists() ? snap.data() : {};
+  let customPalettes = [];
+  try { customPalettes = JSON.parse(data.customPalettes) || []; } catch {}
+  const id = 'custom-' + slugify(name) + '-' + Math.random().toString(36).slice(2, 7);
+  customPalettes.push({
+    id, name, price: Math.max(0, Number(price) || 0),
+    tier, mode: mode === 'dark' ? 'dark' : 'light',
+    primaryColor, accentColor,
+    createdAt: Date.now()
+  });
+  await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { customPalettes: JSON.stringify(customPalettes) }, { merge: true });
+  return id;
+}
+
+// Admin-only: adds a brand-new permanent token multiplier tier (e.g. x5, x10)
+// to the shop catalog, on top of the built-in x2/x3.
+async function adminAddMultiplier({ name, multiplier, price }) {
+  const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
+  const data = snap.exists() ? snap.data() : {};
+  let customMultipliers = [];
+  try { customMultipliers = JSON.parse(data.customMultipliers) || []; } catch {}
+  const safeMultiplier = Math.max(2, Number(multiplier) || 2);
+  const id = 'custom-x' + safeMultiplier + '-' + Math.random().toString(36).slice(2, 7);
+  customMultipliers.push({
+    id, name, multiplier: safeMultiplier, price: Math.max(0, Number(price) || 0),
+    createdAt: Date.now()
+  });
+  await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { customMultipliers: JSON.stringify(customMultipliers) }, { merge: true });
+  return id;
+}
+
 export {
   logIn, logOut, watchAuthState,
   getAllUserData, adminAdjustTokens, adminGrantItem,
   adminCreateAccount, adminDeleteAccount,
-  getCompetitionFrozen, setCompetitionFrozen
+  getCompetitionFrozen, setCompetitionFrozen,
+  getCatalog, adminAddPalette, adminAddMultiplier
 };
