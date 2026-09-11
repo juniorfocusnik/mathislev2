@@ -2456,7 +2456,13 @@ watchAuthState(async (user) => {
   document.body.className = document.body.className.replace(/theme-\S+/g, '').trim();
   const activeTheme = localStorage.getItem('activeTheme');
   if (activeTheme) {
-    document.body.classList.add(`theme-${activeTheme}`);
+    // Delegate to applyPalette rather than re-deriving the class name here —
+    // a custom (admin-added) palette needs its 'theme-custom' class plus its
+    // colours re-applied as CSS variables, not a literal 'theme-<id>' class
+    // (which was fine for every built-in palette, but doesn't exist as a CSS
+    // rule for a custom one, so the page silently fell back to default
+    // colours on every fresh page load).
+    applyPalette(activeTheme);
   }
 
   renderAuthStatus();
