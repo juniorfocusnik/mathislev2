@@ -466,7 +466,13 @@ function applyPalette(id) {
       document.body.style.setProperty('--palette-overlay', hexToRgba(p.accentColor, 0.38));
     });
   }
-  localStorage.setItem('activeTheme', id);
+  // Only write (and so only sync to Firebase) when the theme actually
+  // changed — main.js calls this on every single page load to re-apply
+  // whatever's already equipped, and that shouldn't push a Firestore write
+  // every time someone just clicks a nav link.
+  if (localStorage.getItem('activeTheme') !== id) {
+    localStorage.setItem('activeTheme', id);
+  }
 }
 
 // ---------------- Token Shop (buying) ----------------
