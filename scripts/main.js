@@ -1676,33 +1676,53 @@ if (accountName === null && urlParams.get('page') !== 'login') {
 // detail/actions that stay admin-only.
 // ============================================================
 
+function leaderboardRankBadge(rank) {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return String(rank);
+}
+
 async function renderLeaderboard() {
   document.querySelector('main').innerHTML = `
     <div class="home">
-      <div class="home-title">Leaderboard</div>
+      <div class="home-title">🏆 Leaderboard</div>
       <div class="home-secondary">Loading...</div>
     </div>
   `;
   try {
-    const users = await getAllUserData();
-    const rows = users
-      .filter((u) => !u.raw.disabled)
-      .map((u, i) => `<tr><td>${i + 1}</td><td>${u.username}</td><td>${u.tokens}</td></tr>`)
-      .join('');
+    const users = (await getAllUserData()).filter((u) => !u.raw.disabled);
+    const myIndex = users.findIndex((u) => u.username === fullUsername);
+
+    const rows = users.map((u, i) => {
+      const rank = i + 1;
+      const isMe = i === myIndex;
+      const rankClass = rank <= 3 ? ` leaderboard-row-rank-${rank}` : '';
+      return `
+        <div class="home leaderboard-row${rankClass}${isMe ? ' leaderboard-row-you' : ''}">
+          <div class="leaderboard-rank">${leaderboardRankBadge(rank)}</div>
+          <div class="leaderboard-name">${u.username}${isMe ? '<span class="leaderboard-you-tag">YOU</span>' : ''}</div>
+          <div class="leaderboard-tokens">${u.tokens} <img src="icons/token.png" class="token-count-img"></div>
+        </div>
+      `;
+    }).join('');
+
+    const myRankLine = myIndex >= 0
+      ? `<div class="home-secondary">You're ranked <b>#${myIndex + 1}</b> of ${users.length} with <b>${users[myIndex].tokens}</b> tokens.</div>`
+      : '';
+
     document.querySelector('main').innerHTML = `
       <div class="home">
-        <div class="home-title">Leaderboard</div>
+        <div class="home-title">🏆 Leaderboard</div>
         <div class="home-secondary">Top token earners across Mathisle-v2.</div>
+        ${myRankLine}
       </div>
-      <table class="admin-table admin-leaderboard">
-        <tr><th>#</th><th>Name</th><th>Tokens</th></tr>
-        ${rows || '<tr><td colspan="3">No players yet.</td></tr>'}
-      </table>
+      ${rows || '<div class="home"><div class="home-secondary">No players yet.</div></div>'}
     `;
   } catch (err) {
     document.querySelector('main').innerHTML = `
       <div class="home">
-        <div class="home-title">Leaderboard</div>
+        <div class="home-title">🏆 Leaderboard</div>
         <div class="home-secondary">Couldn't load the leaderboard: ${err.message}</div>
       </div>
     `;
