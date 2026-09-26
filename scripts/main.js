@@ -3,7 +3,7 @@ import { runGame } from './game-difficulties/game-engine.js';
 import {
   logIn, logOut, watchAuthState,
   getAllUserData, adminAdjustTokens, adminGrantItem,
-  adminCreateAccount, adminDeleteAccount,
+  adminCreateAccount, adminDeleteAccount, adminWipeAccount,
   getCompetitionFrozen, setCompetitionFrozen,
   getCatalog, adminAddPalette, adminAddMultiplier
 } from './auth.js';
@@ -1641,6 +1641,8 @@ if (accountName === null && urlParams.get('page') !== 'login') {
   renderShop();
 } else if (urlParams.get('page') === 'equip-palette') {
   renderEquipPalettePage();
+} else if (urlParams.get('page') === 'leaderboard') {
+  renderLeaderboard();
 } else if (
   (urlParams.get('page') === 'game-normal-play') ||
   (urlParams.get('page') === 'game-hard-play') ||
@@ -1665,6 +1667,46 @@ if (accountName === null && urlParams.get('page') !== 'login') {
       </div>
   `;
 }
+}
+
+// ============================================================
+// LEADERBOARD (?page=leaderboard) — public token ranking, open to any
+// logged-in player. Reuses getAllUserData (same source as the admin
+// dashboard) but only ever displays name + tokens, none of the per-player
+// detail/actions that stay admin-only.
+// ============================================================
+
+async function renderLeaderboard() {
+  document.querySelector('main').innerHTML = `
+    <div class="home">
+      <div class="home-title">Leaderboard</div>
+      <div class="home-secondary">Loading...</div>
+    </div>
+  `;
+  try {
+    const users = await getAllUserData();
+    const rows = users
+      .filter((u) => !u.raw.disabled)
+      .map((u, i) => `<tr><td>${i + 1}</td><td>${u.username}</td><td>${u.tokens}</td></tr>`)
+      .join('');
+    document.querySelector('main').innerHTML = `
+      <div class="home">
+        <div class="home-title">Leaderboard</div>
+        <div class="home-secondary">Top token earners across Mathisle-v2.</div>
+      </div>
+      <table class="admin-table admin-leaderboard">
+        <tr><th>#</th><th>Name</th><th>Tokens</th></tr>
+        ${rows || '<tr><td colspan="3">No players yet.</td></tr>'}
+      </table>
+    `;
+  } catch (err) {
+    document.querySelector('main').innerHTML = `
+      <div class="home">
+        <div class="home-title">Leaderboard</div>
+        <div class="home-secondary">Couldn't load the leaderboard: ${err.message}</div>
+      </div>
+    `;
+  }
 }
 
 // ============================================================
@@ -1835,6 +1877,22 @@ function openDeleteAccountModal(uid, username) {
     onConfirm: async () => {
       await adminDeleteAccount(uid);
       unlockAdminDashboard();
+    }
+  });
+}
+
+function openWipeAccountModal(uid, username) {
+  openMathisleModal({
+    title: '⚠ Wipe Account',
+    danger: true,
+    confirmLabel: 'Wipe Everything',
+    bodyHtml: `
+      <p>You are about to wipe <b>${username}</b>'s progress: every token, every boost/palette they own or have bought, and their entire game/purchase/admin-change history.</p>
+      <p>Unlike Delete, their account stays usable — they can still log in, just starting completely fresh at 0. This cannot be undone.</p>
+    `,
+    onConfirm: async () => {
+      await adminWipeAccount(uid);
+      unlockAdminDashboard(uid);
     }
   });
 }
@@ -2107,6 +2165,7 @@ function describeAdminLogEntry(e) {
   if (e.type === 'tokens-given') return `Gave ${e.amount} tokens`;
   if (e.type === 'tokens-removed') return `Removed ${e.amount} tokens`;
   if (e.type === 'item-granted') return `Granted "${e.itemName}" for free`;
+  if (e.type === 'account-wiped') return 'Wiped account (tokens, history, everything bought)';
   return 'Unknown change';
 }
 
@@ -2265,6 +2324,9 @@ function buildAdminDetailHtml(u, grantOptionsHtml, catalog) {
           <select class="admin-grant-select" id="admin-grant-select-${u.uid}">${grantOptionsHtml}</select>
           <button class="admin-grant-btn" data-uid="${u.uid}">Grant Free</button>
         </div>
+        <div class="admin-action-row">
+          <button class="admin-wipe-btn" data-uid="${u.uid}" data-username="${u.username}">Wipe Account (tokens, history, purchases)</button>
+        </div>
 
         <h4>Admin Change History (${u.adminLog.length}, most recent first)</h4>
         <table class="admin-table">
@@ -2318,6 +2380,12 @@ function wireAdminDashboard() {
   document.querySelectorAll('.admin-delete-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       openDeleteAccountModal(btn.dataset.uid, btn.dataset.username);
+    });
+  });
+
+  document.querySelectorAll('.admin-wipe-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      openWipeAccountModal(btn.dataset.uid, btn.dataset.username);
     });
   });
 
