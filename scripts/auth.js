@@ -354,6 +354,23 @@ async function adminDeleteAccount(uid) {
   await setDoc(doc(db, 'users', uid), { disabled: true });
 }
 
+// Admin-only: resets a player back to a fresh account — tokens, every
+// boost/palette owned (forever or timed), and all history (games,
+// purchases, past admin changes) are wiped — but unlike adminDeleteAccount,
+// the account itself stays usable: username/password keep working and
+// they're not blocked from logging back in, they just start over at 0.
+async function adminWipeAccount(uid) {
+  const snap = await getDoc(doc(db, 'users', uid));
+  const username = snap.exists() ? (snap.data().username || '') : '';
+  await deleteDoc(doc(db, 'users', uid));
+  await setDoc(doc(db, 'users', uid), {
+    username,
+    tokens: '0',
+    ownedPalettes: '[]',
+    adminLog: JSON.stringify([{ type: 'account-wiped', timestamp: Date.now() }])
+  });
+}
+
 // Site-wide switch for the admin to freeze the competition: once true, every
 // action that changes a token balance (playing a game, spending in the token
 // shop, tab-switch penalties) refuses to do anything — see the checks in
@@ -444,7 +461,7 @@ async function adminAddMultiplier({ name, multiplier, price, duration, icon }) {
 export {
   logIn, logOut, watchAuthState,
   getAllUserData, adminAdjustTokens, adminGrantItem,
-  adminCreateAccount, adminDeleteAccount,
+  adminCreateAccount, adminDeleteAccount, adminWipeAccount,
   getCompetitionFrozen, setCompetitionFrozen,
   getCatalog, adminAddPalette, adminAddMultiplier
 };
