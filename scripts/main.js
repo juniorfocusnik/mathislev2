@@ -1753,7 +1753,7 @@ function buildGrantableItems(catalog) {
     ...TIMED_BOOSTS.map(b => ({ id: b.id, name: b.name, category: 'timed-boost', extra: {} })),
     ...ALL_PALETTES.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: {} })),
     ...catalog.customMultipliers.map(m => ({ id: m.id, name: m.name, category: 'custom-multiplier', extra: { multiplier: m.multiplier, duration: m.duration } })),
-    ...catalog.customPalettes.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: { limited: p.tier === 'limited' } }))
+    ...catalog.customPalettes.map(p => ({ id: p.id, name: p.name, category: 'palette', extra: { limited: p.tier === 'limited', endDate: p.endDate } }))
   ];
 }
 
@@ -1957,8 +1957,16 @@ function readImageFileAsDataUri(fileInput) {
 
 // If the admin doesn't upload a picture, token-shop.js generates a plain
 // colour-swatch/badge icon instead — so this is optional, not required.
+// <input type="datetime-local"> wants "YYYY-MM-DDTHH:MM" in local time.
+function toDateTimeLocalValue(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function openAddPaletteModal() {
-  openMathisleModal({
+  const now = Date.now();
+  const overlay = openMathisleModal({
     title: 'Add New Palette',
     confirmLabel: 'Add Palette',
     bodyHtml: `
@@ -1970,9 +1978,17 @@ function openAddPaletteModal() {
             <option value="simple">Simple</option>
             <option value="rare">Rare</option>
             <option value="ultra">Ultra Special</option>
-            <option value="limited">Limited Edition (2 weeks)</option>
+            <option value="limited">Limited Edition (pick dates)</option>
           </select>
         </label>
+      </div>
+      <div id="new-palette-dates" style="display:none">
+        <div class="admin-action-row">
+          <label>Starts: <input type="datetime-local" id="new-palette-start" value="${toDateTimeLocalValue(now)}"></label>
+        </div>
+        <div class="admin-action-row">
+          <label>Ends: <input type="datetime-local" id="new-palette-end" value="${toDateTimeLocalValue(now + 14 * 24 * 60 * 60 * 1000)}"></label>
+        </div>
       </div>
       <div class="admin-action-row">
         <label>Mode:
@@ -1995,18 +2011,38 @@ function openAddPaletteModal() {
       const price = Number(overlay.querySelector('#new-palette-price').value);
       if (!name) throw new Error('Please enter a palette name.');
       if (!price || price <= 0) throw new Error('Please enter a price.');
+      const tier = overlay.querySelector('#new-palette-tier').value;
+      let startDate;
+      let endDate;
+      if (tier === 'limited') {
+        startDate = new Date(overlay.querySelector('#new-palette-start').value).getTime();
+        endDate = new Date(overlay.querySelector('#new-palette-end').value).getTime();
+        if (!startDate || !endDate) throw new Error('Please pick both a start and an end date.');
+        if (endDate <= startDate) throw new Error('The end date has to be after the start date.');
+        if (endDate <= Date.now()) throw new Error('The end date is already in the past.');
+      }
       const icon = await readImageFileAsDataUri(overlay.querySelector('#new-palette-icon'));
       await adminAddPalette({
         name,
         price,
-        tier: overlay.querySelector('#new-palette-tier').value,
+        tier,
         mode: overlay.querySelector('#new-palette-mode').value,
         primaryColor: overlay.querySelector('#new-palette-primary').value,
         accentColor: overlay.querySelector('#new-palette-accent').value,
-        icon
+        icon,
+        startDate,
+        endDate
       });
       unlockAdminDashboard();
     }
+  });
+
+  // Only a limited-edition palette has a start/end window, so only show the
+  // date pickers when that tier is chosen.
+  const tierSelect = overlay.querySelector('#new-palette-tier');
+  const datesRow = overlay.querySelector('#new-palette-dates');
+  tierSelect.addEventListener('change', () => {
+    datesRow.style.display = tierSelect.value === 'limited' ? '' : 'none';
   });
 }
 
@@ -2253,15 +2289,34 @@ function buildAdminDetailHtml(u, grantOptionsHtml, catalog) {
     return `<tr><td>${b.name}</td><td>Active</td><td>${formatDuration(usedMs)}</td><td>${formatDuration(remainingMs)}</td></tr>`;
   }).join('');
 
-  const LIMITED_PALETTE_MS = 14 * 24 * 60 * 60 * 1000;
   const limitedPalettes = catalog.customPalettes.filter((p) => p.tier === 'limited');
   const limitedRows = limitedPalettes.map((p) => {
+    const owned = u.ownedPalettes.includes(p.id);
+    const endDate = Number(p.endDate) || 0;
+
+    if (endDate > 0) {
+      // Dated: one shared window for everyone.
+      const startDate = Number(p.startDate) || 0;
+      const windowText = `${formatTimestamp(startDate)} – ${formatTimestamp(endDate)}`;
+      let status;
+      let remaining;
+      if (now < startDate) {
+        status = owned ? 'Owned (not open yet)' : 'Not owned';
+        remaining = `Opens in ${formatDurationDays(startDate - now)}`;
+      } else if (now >= endDate) {
+        status = owned ? 'Expired' : 'Ended';
+        remaining = '—';
+      } else {
+        status = owned ? 'Owned' : 'Not owned';
+        remaining = formatDurationDays(endDate - now);
+      }
+      return `<tr><td>${p.name}</td><td>${windowText}</td><td>${status}</td><td>${remaining}</td></tr>`;
+    }
+
+    // Older undated one: 2 weeks from this player's own purchase.
     const expiry = Number(u.raw['expiry_palette_' + p.id]) || 0;
-    const active = now < expiry;
-    if (!active) return `<tr><td>${p.name}</td><td>Not active</td><td>—</td><td>—</td></tr>`;
-    const remainingMs = expiry - now;
-    const usedMs = LIMITED_PALETTE_MS - remainingMs;
-    return `<tr><td>${p.name}</td><td>Active</td><td>${formatDurationDays(usedMs)}</td><td>${formatDurationDays(remainingMs)}</td></tr>`;
+    if (now >= expiry) return `<tr><td>${p.name}</td><td>2 weeks from purchase</td><td>Not active</td><td>—</td></tr>`;
+    return `<tr><td>${p.name}</td><td>2 weeks from purchase</td><td>Active</td><td>${formatDurationDays(expiry - now)}</td></tr>`;
   }).join('');
 
   const s = u.stats;
@@ -2322,9 +2377,9 @@ function buildAdminDetailHtml(u, grantOptionsHtml, catalog) {
         </table>
 
         ${limitedPalettes.length ? `
-        <h4>Limited Edition Palettes (2 Weeks)</h4>
+        <h4>Limited Edition Palettes</h4>
         <table class="admin-table">
-          <tr><th>Palette</th><th>Status</th><th>Used</th><th>Remaining</th></tr>
+          <tr><th>Palette</th><th>Window</th><th>Status</th><th>Remaining</th></tr>
           ${limitedRows}
         </table>
         ` : ''}
