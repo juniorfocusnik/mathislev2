@@ -367,42 +367,84 @@ function customMultiplierToItem(m) {
   };
 }
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatDateTime(ts) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${String(d.getDate()).padStart(2, '0')} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+}
+
 // Adapts a catalog palette entry into the same shape as a built-in palette item.
+//
+// A limited-edition palette has a shared window set by the admin
+// (startDate/endDate, ms timestamps): it can only be bought inside the
+// window, and it stops working for EVERY player the moment endDate passes.
+// Older limited palettes made before windows existed have no dates — those
+// keep the old behaviour (2 weeks from each player's own purchase).
 function customPaletteToItem(p) {
+  const limited = p.tier === 'limited';
+  const dated = limited && Number(p.endDate) > 0;
+  let desc = 'A custom palette recolouring the whole site.';
+  if (dated) {
+    desc = `A limited-edition palette — available ${formatDateTime(p.startDate)} until ${formatDateTime(p.endDate)}. It disappears for everyone when the window closes.`;
+  } else if (limited) {
+    desc = 'A limited-edition palette — active for 2 weeks from the moment you get it, then it expires.';
+  }
   return {
     id: p.id,
     name: p.name,
-    desc: p.tier === 'limited'
-      ? 'A limited-edition palette — active for 2 weeks from the moment you get it, then it expires.'
-      : 'A custom palette recolouring the whole site.',
+    desc,
     price: p.price,
     icon: p.icon || paletteSwatchDataUri(p.primaryColor, p.accentColor),
     mode: p.mode,
     primaryColor: p.primaryColor,
     accentColor: p.accentColor,
     tier: p.tier,
-    limited: p.tier === 'limited'
+    limited,
+    startDate: dated ? (Number(p.startDate) || 0) : 0,
+    endDate: dated ? Number(p.endDate) : 0
   };
 }
 
+// Per-player expiry key — only used by older undated limited palettes.
 function getPaletteExpiry(id) {
   return Number(localStorage.getItem('expiry_palette_' + id)) || 0;
 }
-function isLimitedPaletteExpired(id) {
-  const expiry = getPaletteExpiry(id);
-  return expiry > 0 && Date.now() >= expiry;
+
+// When a limited palette stops working: the shared end date for a dated
+// one, or this player's own purchase-based expiry for an undated one.
+function getLimitedExpiry(item) {
+  return item.endDate > 0 ? item.endDate : getPaletteExpiry(item.id);
 }
 
-// Drops any limited-edition palette whose 2-week window has passed from
+// 'upcoming' (before startDate), 'active' (buyable now) or 'ended'.
+// Undated limited palettes and normal palettes are always 'active'.
+function getLimitedPaletteState(item) {
+  if (!item.limited || !(item.endDate > 0)) return 'active';
+  const now = Date.now();
+  if (now < item.startDate) return 'upcoming';
+  if (now >= item.endDate) return 'ended';
+  return 'active';
+}
+
+// Drops any limited-edition palette whose window has closed from
 // ownedPalettes, and falls back to the Default palette if the expired one
 // was the currently-equipped theme. Called whenever the shop/equip pages
-// load, once the catalog (which is what says which owned ids are "limited")
-// is available.
+// load (and when a custom theme is re-applied), once the catalog (which is
+// what says which owned ids are "limited") is available.
 function pruneExpiredLimitedPalettes(catalog) {
-  const limitedIds = new Set(catalog.customPalettes.filter(p => p.tier === 'limited').map(p => p.id));
-  if (limitedIds.size === 0) return;
+  const limitedItems = catalog.customPalettes.map(customPaletteToItem).filter(i => i.limited);
+  if (limitedItems.length === 0) return;
+  const limitedIds = new Set(limitedItems.map(i => i.id));
+  const expiredIds = new Set(
+    limitedItems.filter(i => {
+      const expiry = getLimitedExpiry(i);
+      return expiry > 0 && Date.now() >= expiry;
+    }).map(i => i.id)
+  );
   const owned = getOwnedPalettes();
-  const stillOwned = owned.filter(id => !(limitedIds.has(id) && isLimitedPaletteExpired(id)));
+  const stillOwned = owned.filter(id => !expiredIds.has(id));
   if (stillOwned.length !== owned.length) {
     localStorage.setItem('ownedPalettes', JSON.stringify(stillOwned));
     const activeTheme = localStorage.getItem('activeTheme');
@@ -457,6 +499,11 @@ function applyPalette(id) {
     document.body.classList.add('theme-custom');
     ensureCatalog().then((catalog) => {
       // Bail if the palette changed again before this resolved.
+      if (localStorage.getItem('activeTheme') !== id) return;
+      // If this is a limited palette whose window has closed, this drops it
+      // and switches back to Default — so it stops applying on every page,
+      // not only once the player happens to open the shop.
+      pruneExpiredLimitedPalettes(catalog);
       if (localStorage.getItem('activeTheme') !== id) return;
       const p = catalog.customPalettes.find(cp => cp.id === id);
       if (!p) return;
@@ -536,12 +583,24 @@ function renderShopWithCatalog(catalog) {
   function paletteGridHtml(list) {
     return list.map(item => {
       const owned = ownedPalettes.includes(item.id);
+      const state = getLimitedPaletteState(item);
       const blocked = !owned && tokens < item.price;
-      return renderCard(item, 'palette', {
-        buttonHtml: owned
-          ? `<button class="shop-buy-btn shop-owned-btn" disabled>Owned</button>`
-          : `<button class="shop-buy-btn" data-action="buy-palette" data-id="${item.id}" ${blocked ? 'disabled' : ''}>Buy for ${item.price}</button>`
-      });
+      let buttonHtml;
+      if (owned) {
+        buttonHtml = `<button class="shop-buy-btn shop-owned-btn" disabled>Owned</button>`;
+      } else if (state === 'upcoming') {
+        buttonHtml = `<button class="shop-buy-btn shop-owned-btn" disabled>Opens ${formatDateTime(item.startDate)}</button>`;
+      } else if (state === 'ended') {
+        buttonHtml = `<button class="shop-buy-btn shop-owned-btn" disabled>Ended</button>`;
+      } else {
+        buttonHtml = `<button class="shop-buy-btn" data-action="buy-palette" data-id="${item.id}" ${blocked ? 'disabled' : ''}>Buy for ${item.price}</button>`;
+      }
+      // Live countdown to the shared end date, for a dated limited palette
+      // that's currently on sale.
+      if (item.limited && item.endDate > 0 && state === 'active' && !owned) {
+        buttonHtml = `<div class="palette-mode-badge">⏳ Ends in ${formatRemaining(item.endDate - Date.now())}</div>` + buttonHtml;
+      }
+      return renderCard(item, 'palette', { buttonHtml });
     }).join('');
   }
 
@@ -550,9 +609,11 @@ function renderShopWithCatalog(catalog) {
     if (customByTier[item.tier]) customByTier[item.tier].push(item);
   });
 
-  const limitedSectionHtml = customByTier.limited.length ? `
-    <div class="shop-category-title">Limited Edition Palettes (2 Weeks)</div>
-    <div class="shop-grid">${paletteGridHtml(customByTier.limited)}</div>
+  // A limited palette whose window has closed is gone from the shop entirely.
+  const liveLimited = customByTier.limited.filter(item => getLimitedPaletteState(item) !== 'ended');
+  const limitedSectionHtml = liveLimited.length ? `
+    <div class="shop-category-title">Limited Edition Palettes</div>
+    <div class="shop-grid">${paletteGridHtml(liveLimited)}</div>
   ` : '';
 
   const tutoringCards = TUTORING.map(item => {
@@ -628,11 +689,22 @@ function onButtonClick(e) {
     buyTimedBoost(item);
   } else if (action === 'buy-palette') {
     const item = currentPaletteItems.find(p => p.id === id);
+    // The shop may have been sitting open past the window — check again now.
+    const state = getLimitedPaletteState(item);
+    if (state !== 'active') {
+      alert(state === 'upcoming'
+        ? `"${item.name}" isn't on sale yet — it opens ${formatDateTime(item.startDate)}.`
+        : `"${item.name}" has ended and can't be bought any more.`);
+      renderShop();
+      return;
+    }
     buyOneTimeItem(item, 'palette', () => {
       const owned = getOwnedPalettes();
       owned.push(item.id);
       localStorage.setItem('ownedPalettes', JSON.stringify(owned));
-      if (item.limited) {
+      // Dated limited palettes end on the shared end date, so they need no
+      // per-player timer. Only older undated ones get a 2-week-from-purchase one.
+      if (item.limited && !(item.endDate > 0)) {
         localStorage.setItem('expiry_palette_' + item.id, String(Date.now() + LIMITED_PALETTE_DURATION_MS));
       }
     });
@@ -664,9 +736,12 @@ function buyOneTimeItem(item, category, onSuccess) {
     alert("The competition has ended — the token shop is closed while results are being gathered.");
     return;
   }
-  const confirmMsg = item.limited
-    ? `Buy "${item.name}" for ${item.price} tokens? It's limited-edition — active for 2 weeks from today, then it expires.`
-    : `Buy "${item.name}" for ${item.price} tokens?`;
+  let confirmMsg = `Buy "${item.name}" for ${item.price} tokens?`;
+  if (item.limited && item.endDate > 0) {
+    confirmMsg = `Buy "${item.name}" for ${item.price} tokens? It's limited-edition — it stops working for everyone on ${formatDateTime(item.endDate)}.`;
+  } else if (item.limited) {
+    confirmMsg = `Buy "${item.name}" for ${item.price} tokens? It's limited-edition — active for 2 weeks from today, then it expires.`;
+  }
   if (!confirm(confirmMsg)) return;
   if (!spendTokens(item.price)) {
     alert("You don't have enough tokens for that yet!");
@@ -758,7 +833,7 @@ function renderEquipPageWithCatalog(catalog) {
     return list.map(item => {
       const owned = ownedPalettes.includes(item.id);
       const active = activeTheme === item.id;
-      const remaining = item.limited && owned ? formatRemaining(getPaletteExpiry(item.id) - Date.now()) : null;
+      const remaining = item.limited && owned ? formatRemaining(getLimitedExpiry(item) - Date.now()) : null;
       return renderPaletteTile(item, owned, active, remaining);
     }).join('');
   }
@@ -773,9 +848,10 @@ function renderEquipPageWithCatalog(catalog) {
     if (customByTier[item.tier]) customByTier[item.tier].push(item);
   });
 
-  const limitedSectionHtml = customByTier.limited.length ? `
-    <div class="shop-category-title">Limited Edition Palettes (2 Weeks)</div>
-    <div class="shop-grid">${tierHtml(customByTier.limited)}</div>
+  const liveLimited = customByTier.limited.filter(item => getLimitedPaletteState(item) !== 'ended');
+  const limitedSectionHtml = liveLimited.length ? `
+    <div class="shop-category-title">Limited Edition Palettes</div>
+    <div class="shop-grid">${tierHtml(liveLimited)}</div>
   ` : '';
 
   document.querySelector('main').innerHTML = `
