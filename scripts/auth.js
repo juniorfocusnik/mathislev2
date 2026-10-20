@@ -278,8 +278,9 @@ async function adminAdjustTokens(uid, delta) {
 // 'palette' | 'custom-multiplier', `id` is the item's id, `name` is its
 // display name (for the admin log entry). `extra` carries category-specific
 // info the catalog knows but this function doesn't look up itself:
-// `{ limited: true }` for a limited-edition palette (starts its 14-day
-// countdown immediately), `{ multiplier: N, duration: 'forever' | '10h' }`
+// `{ limited: true, endDate }` for a limited-edition palette (`endDate` is
+// its shared end timestamp; without one it's an older undated palette and
+// gets a 14-day countdown from now), `{ multiplier: N, duration: 'forever' | '10h' }`
 // for a custom multiplier tier.
 async function adminGrantItem(uid, category, id, name, extra = {}) {
   const snap = await getDoc(doc(db, 'users', uid));
@@ -308,7 +309,9 @@ async function adminGrantItem(uid, category, id, name, extra = {}) {
     try { owned = JSON.parse(data.ownedPalettes) || []; } catch {}
     if (!owned.includes(id)) owned.push(id);
     updates.ownedPalettes = JSON.stringify(owned);
-    if (extra.limited) {
+    // A dated limited palette ends on its shared end date, so it needs no
+    // per-player timer; only an older undated one gets 2 weeks from now.
+    if (extra.limited && !(Number(extra.endDate) > 0)) {
       updates['expiry_palette_' + id] = String(Date.now() + 14 * 24 * 60 * 60 * 1000);
     }
   } else if (category === 'custom-multiplier') {
@@ -416,7 +419,7 @@ async function getCatalog() {
 // so embedding it directly in the document is the simplest way to make an
 // uploaded image "just work"). Left out, token-shop.js generates a plain
 // colour-swatch icon from primaryColor/accentColor instead.
-async function adminAddPalette({ name, price, tier, mode, primaryColor, accentColor, icon }) {
+async function adminAddPalette({ name, price, tier, mode, primaryColor, accentColor, icon, startDate, endDate }) {
   const snap = await getDoc(doc(db, 'users', SETTINGS_DOC_ID));
   const data = snap.exists() ? snap.data() : {};
   let customPalettes = [];
@@ -429,6 +432,12 @@ async function adminAddPalette({ name, price, tier, mode, primaryColor, accentCo
     createdAt: Date.now()
   };
   if (icon) entry.icon = icon;
+  // For a limited-edition palette: the shared window (ms timestamps) it can
+  // be bought in, and when it stops working for every player.
+  if (tier === 'limited' && Number(endDate) > 0) {
+    entry.startDate = Number(startDate) || Date.now();
+    entry.endDate = Number(endDate);
+  }
   customPalettes.push(entry);
   await setDoc(doc(db, 'users', SETTINGS_DOC_ID), { customPalettes: JSON.stringify(customPalettes) }, { merge: true });
   return id;
